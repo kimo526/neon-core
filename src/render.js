@@ -1,7 +1,34 @@
 // 渲染层：只读 world，不改逻辑。所有"手感"的视觉部分都在这里。
-import { ARENA, TUNING } from './content.js';
+import { ARENA, GRAZE, TUNING } from './content.js';
 
 const TAU = Math.PI * 2;
+
+/** 弹幕子弹贴图缓存：弹幕模式下同屏几百发，靠预渲染把每帧的渐变绘制降到 0 */
+const bulletSprites = new Map();
+function bulletSprite(color, r) {
+  const key = `${color}|${Math.round(r * 2) / 2}`;
+  let sprite = bulletSprites.get(key);
+  if (sprite) return sprite;
+  const rr = Math.round(r * 2) / 2;
+  const pad = 3;
+  const size = Math.ceil(rr * 2 + pad * 2);
+  sprite = document.createElement('canvas');
+  sprite.width = size;
+  sprite.height = size;
+  const c = sprite.getContext('2d');
+  const mid = size / 2;
+  const g = c.createRadialGradient(mid, mid, 0, mid, mid, rr + pad);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.4, color);
+  g.addColorStop(0.75, withAlpha(color, 0.55));
+  g.addColorStop(1, withAlpha(color, 0));
+  c.fillStyle = g;
+  c.beginPath();
+  c.arc(mid, mid, rr + pad, 0, Math.PI * 2);
+  c.fill();
+  bulletSprites.set(key, sprite);
+  return sprite;
+}
 
 /** 一道锯齿状黑闪电（特殊攻击特效专用） */
 function bolt(ctx, x0, y0, angle, len, seed) {
@@ -180,15 +207,14 @@ export function createRenderer(canvas) {
       ctx.shadowBlur = 0;
     }
 
-    // 敌方子弹
+    // 敌方子弹：弹幕要看得清，所以用预算好的贴图 + 白色内核（比每帧画渐变快一个数量级）
     for (const b of world.eBullets) {
-      ctx.shadowColor = b.color;
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = b.color;
+      const sprite = bulletSprite(b.color, b.r);
+      ctx.drawImage(sprite, b.x - sprite.width / 2, b.y - sprite.height / 2);
+      ctx.fillStyle = b.grazed ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.92)';
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, TAU);
+      ctx.arc(b.x, b.y, b.r * 0.42, 0, TAU);
       ctx.fill();
-      ctx.shadowBlur = 0;
     }
 
     // 粒子
@@ -206,7 +232,29 @@ export function createRenderer(canvas) {
       drawPlayer(ctx, world, p, t);
     }
 
-    if (mouse) drawCursor(ctx, mouse, world);
+    // 擦弹：贴身闪光 + 机体周围的判定环
+    for (const p of world.players) {
+      if (p.down) continue;
+      if (p.grazeFlash > 0) {
+        const a = p.grazeFlash / 0.3;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 * a})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, GRAZE.radius * (1.25 - a * 0.25), 0, TAU);
+        ctx.stroke();
+      }
+      if (p.grazeCharge > 0) {
+        const k = Math.min(1, p.grazeCharge / GRAZE.chargeNeeded);
+        ctx.strokeStyle = `rgba(255, 214, 102, ${0.25 + k * 0.6})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius + 7, -Math.PI / 2, -Math.PI / 2 + k * TAU);
+        ctx.stroke();
+      }
+    }
+
+    // 瞄准光标：只画 P1 的（多人时 P2 用方向键，不需要鼠标指示）
+    if (mouse && world.players.length <= 1) drawCursor(ctx, mouse, world);
 
     ctx.restore();
 
@@ -394,7 +442,7 @@ function drawEnemy(ctx, e, t) {
 
   if (e.spawnT > 0) {
     // 入场提示环
-    const k = 1 - e.spawnT / 0.45;
+    const k = 1 - e.spawnT / (e.boss ? 1.1 : 0.45);
     ctx.strokeStyle = `rgba(255,255,255,${0.25 + 0.35 * k})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -435,6 +483,31 @@ function drawEnemy(ctx, e, t) {
   ctx.fillStyle = color;
   ctx.fill();
   ctx.shadowBlur = 0;
+
+  // Boss：外圈反向旋转的装甲环 + 内部脉冲核心，一眼看出"这是个大家伙"
+  if (e.boss) {
+    const pulse = 1 + Math.sin(t * 4) * 0.06;
+    ctx.rotate(-rot * 2.6);
+    ctx.strokeStyle = withAlpha(e.color, 0.85);
+    ctx.lineWidth = 3;
+    for (let ringI = 0; ringI < 2; ringI++) {
+      const rr = r * (1.25 + ringI * 0.24) * pulse;
+      const seg = 5 + ringI * 2;
+      ctx.beginPath();
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * TAU;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = withAlpha(e.color, 0.35);
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.62 * pulse, 0, TAU);
+    ctx.fill();
+  }
   ctx.restore();
 
   // 破空：被震住的敌人头上闪火花

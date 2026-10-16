@@ -8,21 +8,24 @@
 </head>
 <body>
   <div id="stage">
-    <canvas id="game" width="960" height="540"></canvas>
-    <div id="hud"></div>
-    <div id="overlay" class="show">
-      <div class="panel">
-        <h1>NEON <span>CORE</span></h1>
-        <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
-        <ul class="keys">
-          <li><b>W A S D</b> 移动</li>
-          <li><b>鼠标</b> 瞄准 &nbsp;/&nbsp; <b>左键</b> 射击</li>
-          <li><b>空格</b> 冲刺（无敌帧，穿敌）</li>
-          <li><b>1 2 3</b> 选择强化</li>
-        </ul>
-        <p class="hint" id="overlay-hint">按 <b>回车</b> 或点击这里开始</p>
+    <div class="stage-inner">
+      <canvas id="game" width="960" height="540"></canvas>
+      <div id="hud"></div>
+      <div id="overlay" class="show">
+        <div class="panel">
+          <h1>NEON <span>CORE</span></h1>
+          <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
+          <ul class="keys">
+            <li><b>W A S D</b> 移动</li>
+            <li><b>鼠标</b> 瞄准 &nbsp;/&nbsp; <b>左键</b> 射击</li>
+            <li><b>空格</b> 冲刺（无敌帧，穿敌）</li>
+            <li><b>1 2 3</b> 选择强化</li>
+          </ul>
+          <p class="hint" id="overlay-hint">按 <b>回车</b> 或点击这里开始</p>
+        </div>
       </div>
     </div>
+    <aside id="hints" aria-label="操作提示"></aside>
   </div>
   <script type="module" src="./src/main.js"></script>
 </body>

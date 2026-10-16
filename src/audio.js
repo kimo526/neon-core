@@ -169,6 +169,26 @@ export function createAudio(opts = {}) {
             tone({ type: 'triangle', f0: 900, f1: 220, dur: 0.3, gain: 0.2, filter: { freq: 2000 } });
             noise({ dur: 0.22, gain: 0.18, type: 'bandpass', freq: 3200, q: 1.1 });
             break;
+          case 'graze': {
+            // 擦弹：极短的高频"叮"，靠密集触发堆出东方那种碎响
+            tone({ type: 'sine', f0: 2400, f1: 1900, dur: 0.035, gain: 0.055 });
+            break;
+          }
+          case 'grazeBonus':
+            tone({ type: 'sine', f0: 700, f1: 1500, dur: 0.22, gain: 0.16 });
+            noise({ dur: 0.2, gain: 0.1, type: 'bandpass', freq: 3000, q: 1.2 });
+            break;
+          case 'bossSpawn':
+            // Boss 入场：低频轰鸣 + 警报
+            tone({ type: 'sawtooth', f0: 70, f1: 42, dur: 1.4, gain: 0.34, filter: { freq: 500 } });
+            [0, 1, 2].forEach((i) =>
+              setTimeout(() => tone({ type: 'square', f0: 620, f1: 420, dur: 0.34, gain: 0.14 }), i * 320)
+            );
+            break;
+          case 'bossPhase':
+            tone({ type: 'sawtooth', f0: 340, f1: 120, dur: 0.5, gain: 0.26, filter: { freq: 1400 } });
+            noise({ dur: 0.45, gain: 0.22, freq: 2600, freqEnd: 300 });
+            break;
           case 'jackpot': {
             // 0.1% 的大奖：低频轰鸣 + 金属泛音 + 长尾噪声
             tone({ type: 'sine', f0: 90, f1: 34, dur: 1.1, gain: 0.42 });

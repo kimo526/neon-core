@@ -37,6 +37,23 @@
 
 **双人合作的规则：** 敌人数量 ×1.7、血量额外加成，但敌人会**优先锁定最近的玩家**——所以"谁上去拉仇恨、谁在后面输出"是天然形成的。队友倒地后有 5 秒归队倒计时，两人同时倒才算团灭。两人各自独立的热量、冲刺、强化卡，战报也是分开算的（谁抢到的击杀算谁的）。
 
+## 弹幕玩法（雷霆战机 / 东方那一路）
+
+每 **5 波**来一个**弹幕核心（Boss）**：有血条、分三阶段，血量跌破阈值就换招式。它不靠"子弹多"压人，靠**成体系的弹幕**——每种弹幕都有自己的读法：
+
+| 招式 | 读法 |
+| --- | --- |
+| 螺旋 | 慢速旋转的弹链，读的是"缝在哪" |
+| 环形爆发 | 一圈慢弹 + 一圈快弹，找两层之间的空档 |
+| 自机狙 | 带预判的扇射，别走直线 |
+| 弹墙 | 密弹里留一个旋转缺口，必须钻缝 |
+| 米字弹 | 节奏固定的八向爆发，惩罚站着不动 |
+| 追踪弹 | 慢慢转弯，逼你走位而不是原地微调 |
+
+**擦弹**是这套玩法的核心：子弹贴着机体飞过（26px 内）而不命中，就会积攒**擦弹充能**——攒满自动补 1 段冲刺 + 12 护盾 + 0.35 秒无敌。所以"贴着弹幕走"是有收益的，这也是东方最上瘾的那部分。
+
+**侧边操作提示面板**（画布右侧）常驻显示两套按键，并且是**活的**：Boss 血条、擦弹充能条、每个人的擦弹数与冲刺冷却、特殊攻击的当前概率和已触发次数。窄屏（<980px）会自动折到画布下方变成两列。
+
 ## 声音
 
 没有任何音频文件，**全部是 WebAudio 现场合成**：
@@ -52,17 +69,19 @@
 ## 代码结构
 
 ```
-src/content.js    数值与内容：手感参数、武器、敌人、合作缩放、特殊攻击概率
+src/content.js    数值与内容：手感参数、武器、敌人、合作缩放、特殊攻击概率、擦弹参数
+src/patterns.js   弹幕模式库：螺旋/环形/自机狙/弹墙/米字/追踪 + Boss 分阶段时间线
 src/upgrades.js   强化卡池 + 抽卡（含冲刺构筑 6 张）
 src/sim.js        纯逻辑模拟：step(world, inputs, dt)，不碰 DOM
 src/bot.js        会走位/预判/管理热量的 AI（就是按 G 出场的那个）
 src/harness.js    无头对局跑分（Node 与浏览器共用）
-src/render.js     Canvas 渲染（多人、热量色偏、尾迹、红黑超载特效）
+src/render.js     Canvas 渲染（多人、热量色偏、尾迹、弹幕贴图缓存、红黑超载特效）
+src/hints.js      侧边操作提示面板（静态按键 + 实时 Boss 血条/擦弹充能）
 src/audio.js      音效合成 + 混音总线
 src/voice.js      共振峰机器人播报
 src/input.js      键鼠 → input 对象（单人 / 双人两套映射）
 src/main.js       主循环、多玩家 HUD、界面状态机、window.NEON 调试钩子
-tests/            42 个测试：机制、边界、合作、冲刺构筑、特殊攻击、平衡、长跑稳定性
+tests/            51 个测试：机制、边界、合作、冲刺构筑、特殊攻击、弹幕、平衡、长跑稳定性
 tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图验收
 ```
 
@@ -71,15 +90,16 @@ tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图�
 ## 开发
 
 ```bash
-node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js   # 42 个测试
+node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js   # 51 个测试
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300        # 单人平衡台
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2      # 双人平衡台
 node tools/proc-rate.mjs 180 4                     # 实测特殊攻击多久出一次
 node tools/headless.mjs coop 14                    # 无头开一局双人 + 截图 + 报错检查
+node tools/headless.mjs solo 30 --boss             # 召出弹幕 Boss，弹幕最密时截图
 node tools/headless.mjs solo 20 --proc=0.05        # 强制特殊攻击，专截红黑特效
 ```
 
-改手感只需要动 `src/content.js` 里的 `TUNING` / `WEAPONS` / `ENEMY_TYPES` / `COOP`；特殊攻击概率是 `TUNING.jackpotChance`。
+改手感只需要动 `src/content.js` 里的 `TUNING` / `WEAPONS` / `ENEMY_TYPES` / `COOP` / `GRAZE`；想加新弹幕就往 `src/patterns.js` 的 `PATTERNS` 里加一条（`{ name, cd, fn }`）。
 
 `tools/headless.mjs` 是给自己用的验收工具：它用 Edge 的 DevTools 协议开无头页面、点开始、让 AI 托管、抓页面报错、最后截一张 1280×760 的实机图（`headless-*.png`）。不需要装 Playwright——Node 自带 WebSocket，走 CDP 就够了。
 
@@ -89,9 +109,11 @@ node tools/headless.mjs solo 20 --proc=0.05        # 强制特殊攻击，专截
 
 AI（会预判瞄准、会拉距离、热量到 72% 主动松手；P2 用"方向键八向瞄准"所以更弱）在 8 个种子上跑 300 秒：
 
-| | 平均清波 | 平均击杀 | 命中率 | 备注 |
+| | 平均清波 | 平均击杀 | 命中率 | 300 秒阵亡率 |
 | --- | --- | --- | --- | --- |
-| 单人 | 10.3 | 183 | 90% | 能稳到第 10–13 波 |
-| 双人 | 8.9 | 243 | 84% | P1 92% / P2 68% |
+| 单人 | 10.6 | 194 | 97% | 0% |
+| 双人 | 8.5 | 233 | 83% | 13% |
+
+双人的 13% 阵亡率基本来自弹幕核心——**Boss 是这游戏目前唯一能真正杀死 AI 的东西**，说明弹幕那套压力是有效的。
 
 人类成绩通常会低于这个数（AI 的预判瞄准很准），所以能活过 AI 说明打得不错。目前 AI 在 300 秒内基本不会死，也就是说**难度还有上调空间**——想加难度就改 `COOP.enemyBonus` 和 `ENEMY_SCALING`。

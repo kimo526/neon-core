@@ -1,7 +1,8 @@
 // NEON CORE — 纯逻辑模拟层（支持 1–2 名玩家）。
 // 这一层完全不碰 DOM：可以在浏览器里跑，也可以在 node 里以 60Hz 无头跑几千帧做平衡测试。
-import { ARENA, COOP, ENEMY_SCALING, ENEMY_TYPES, PLAYER_COLORS, TUNING, PLAYER, WEAPONS } from './content.js';
+import { ARENA, COOP, ENEMY_SCALING, ENEMY_TYPES, GRAZE, PLAYER_COLORS, TUNING, PLAYER, WEAPONS } from './content.js';
 import { CARDS, createStats, rollCards } from './upgrades.js';
+import { PATTERNS, bossPhases, pickPattern } from './patterns.js';
 
 const TAU = Math.PI * 2;
 export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -57,6 +58,9 @@ function makePlayer(index, stats, world) {
     stunned: 0,
     shield: 0,
     jackpots: 0,
+    graze: 0,
+    grazeCharge: 0,
+    grazeFlash: 0,
     statsRun: { kills: 0, shots: 0, hits: 0, timeAlive: 0, damageDealt: 0 },
     _world: world,
   };
@@ -105,6 +109,9 @@ export function createWorld(seed = 1, opts = {}) {
 /** 1 号玩家的便捷引用（单人场景/测试里少写点字） */
 export const p1 = (world) => world.players[0];
 
+/** 场上的 Boss（没有则 null）——HUD 画血条用 */
+export const activeBoss = (world) => world.enemies.find((e) => e.boss) ?? null;
+
 /** 还活着（没倒下）的玩家 */
 export const alivePlayers = (world) => world.players.filter((p) => !p.down);
 
@@ -125,6 +132,8 @@ export function waveComposition(wave, coopBonus = 1) {
   if (wave >= 2) add('runner', 1 + Math.floor((wave - 1) * 0.7));
   if (wave >= 4) add('tank', 1 + Math.floor((wave - 4) / 2));
   if (wave >= 3) add('turret', Math.floor(wave / 3));
+  // 每 5 波一个弹幕 Boss：这一波的主题就是"读弹"
+  if (wave % 5 === 0) list.push('boss');
   return list;
 }
 
@@ -161,7 +170,9 @@ function edgeSpawn(world) {
 function spawnEnemy(world, type, scale) {
   const def = ENEMY_TYPES[type];
   const p = edgeSpawn(world);
-  const hp = def.hp * scale.hp;
+  const isBoss = !!def.boss;
+  // Boss 血量随波次增长，保证第 20 波的 Boss 和第 5 波不是一个东西
+  const hp = def.hp * (isBoss ? Math.pow(1.16, world.wave - 5) : scale.hp);
   world.enemies.push({
     id: ++world._id,
     type,
@@ -172,20 +183,28 @@ function spawnEnemy(world, type, scale) {
     radius: def.radius,
     hp,
     hpMax: hp,
-    speed: def.speed * scale.speed,
+    speed: def.speed * (isBoss ? 1 : scale.speed),
     accel: def.accel,
-    damage: def.damage * scale.damage,
+    damage: def.damage,
     color: def.color,
     ranged: !!def.ranged,
-    fireCd: def.ranged ? 1.2 + world.rng() * 0.8 : 0,
+    boss: isBoss,
+    fireCd: isBoss ? 1.6 : def.ranged ? 1.2 + world.rng() * 0.8 : 0,
+    patternCd: 0,
+    pattern: isBoss
+      ? { phase: 0, timeline: bossPhases(world.wave), idx: 0, startedAt: 0, state: { turn: world.rng() * 6, count: 0 } }
+      : def.ranged
+        ? { idx: Math.floor(world.rng() * 4), state: { turn: world.rng() * 6, count: 0 } }
+        : null,
     hurt: 0,
-    spawnT: 0.45,
+    spawnT: isBoss ? 1.1 : 0.45,
     stunned: 0,
     knockX: 0,
     knockY: 0,
     phase: world.rng() * TAU,
     targetId: 0,
   });
+  if (isBoss) ev(world, 'bossSpawn', { x: p.x, y: p.y, wave: world.wave });
 }
 
 function spawnParticles(world, x, y, n, color, opts = {}) {
@@ -318,6 +337,7 @@ function updateSpawns(world, dt) {
 
 function updateWave(world, dt) {
   if (world.phase !== 'play') return;
+  // 还有敌人在场（含 Boss）就不算清场：Boss 必须被打死
   if (world.spawnQueue.length || world.enemies.length) return;
   world.waveClearT += dt;
   if (world.waveClearT < TUNING.waveClearDelay) return;
@@ -488,6 +508,10 @@ function updatePlayer(world, p, input, dt) {
 
   // 回复
   if (st.regen > 0) p.hp = Math.min(st.hpMax, p.hp + st.regen * dt);
+
+  // 擦弹值：不擦就慢慢冷掉（擦弹闪光也在这里衰减）
+  if (p.grazeCharge > 0) p.grazeCharge = Math.max(0, p.grazeCharge - GRAZE.decay * dt);
+  if (p.grazeFlash > 0) p.grazeFlash = Math.max(0, p.grazeFlash - dt);
 }
 
 function fire(world, p, st) {
@@ -610,28 +634,24 @@ function updateEnemies(world, dt) {
       }
     }
 
-    // 远程敌人：保持距离点射
+    // 远程敌人 / Boss：走弹幕招式表
     if (e.ranged) {
-      e.fireCd -= dt;
-      const want = 220;
-      const toward = dist > want + 30 ? 1 : dist < want - 30 ? -1 : 0;
-      e.x += nx * toward * 40 * dt;
-      e.y += ny * toward * 40 * dt;
-      if (e.fireCd <= 0 && dist < 520) {
-        e.fireCd = 1.5 + world.rng() * 0.7;
-        const a = Math.atan2(dy, dx) + (world.rng() - 0.5) * 0.05;
-        world.eBullets.push({
-          x: e.x + Math.cos(a) * (e.radius + 3),
-          y: e.y + Math.sin(a) * (e.radius + 3),
-          vx: Math.cos(a) * 300,
-          vy: Math.sin(a) * 300,
-          r: 4,
-          damage: e.damage,
-          life: 3,
-          color: '#ff9ad4',
-        });
-        ev(world, 'enemyShoot', { x: e.x, y: e.y });
+      // 站位：炮台原地，Boss 保持中距离慢慢绕
+      if (e.boss) {
+        const want = 250;
+        const toward = dist > want + 40 ? 1 : dist < want - 40 ? -1 : 0;
+        const strafe = Math.sin(world.time * 0.7 + e.phase) * 0.8;
+        e.x += (nx * toward - ny * strafe) * 46 * dt;
+        e.y += (ny * toward + nx * strafe) * 46 * dt;
+        e.x = clamp(e.x, e.radius, world.arena.w - e.radius);
+        e.y = clamp(e.y, e.radius, world.arena.h - e.radius);
+      } else {
+        const want = 220;
+        const toward = dist > want + 30 ? 1 : dist < want - 30 ? -1 : 0;
+        e.x += nx * toward * 40 * dt;
+        e.y += ny * toward * 40 * dt;
       }
+      firePattern(world, e, dt, Math.atan2(dy, dx));
     }
 
     // 接触伤害
@@ -656,6 +676,51 @@ function updateEnemies(world, dt) {
   }
 
   world.enemies = world.enemies.filter((e) => e.hp > 0);
+}
+
+/**
+ * 弹幕发射：每个远程敌人都按招式表出手。
+ * Boss 有三阶段时间线，血量跌破阈值就换招；炮台随机挑 4 招轮着打。
+ */
+function firePattern(world, e, dt, aim) {
+  const pt = e.pattern;
+  if (!pt) return;
+  pt.state.count++;
+
+  if (e.boss) {
+    const ratio = e.hp / e.hpMax;
+    const timeline = pt.timeline[pt.phase];
+    if (timeline && ratio <= timeline.hpAbove) {
+      pt.phase = Math.min(pt.timeline.length - 1, pt.phase + 1);
+      pt.idx = 0;
+      pt.startedAt = world.time;
+      ev(world, 'bossPhase', { x: e.x, y: e.y, phase: pt.phase, id: e.id });
+    }
+    const cur = pt.timeline[pt.phase];
+    if (!cur) return;
+    const elapsed = world.time - pt.startedAt;
+    if (elapsed > cur.patterns[pt.idx]?.until) {
+      pt.idx = (pt.idx + 1) % cur.patterns.length;
+      pt.startedAt = world.time;
+      pt.state.turn += 0.6;
+    }
+    const pdef = PATTERNS[cur.patterns[pt.idx].i];
+    pt.state.patternCd = (pt.state.patternCd ?? 0) - dt;
+    if (pt.state.patternCd > 0) return;
+    pt.state.patternCd = pdef.cd;
+    pdef.fn(world, e, aim, pt.state);
+    ev(world, 'enemyShoot', { x: e.x, y: e.y, boss: true });
+    return;
+  }
+
+  // 炮台：四招轮换，节奏比 Boss 慢
+  const pdef = PATTERNS[pt.idx % 4];
+  e.fireCd -= dt;
+  if (e.fireCd > 0) return;
+  e.fireCd = 1.6 + world.rng() * 0.8;
+  if (world.rng() < 0.35) pt.idx = (pt.idx + 1) % 4;
+  pdef.fn(world, e, aim, pt.state);
+  ev(world, 'enemyShoot', { x: e.x, y: e.y });
 }
 
 function damagePlayer(world, p, amount, fromX, fromY) {
@@ -859,18 +924,64 @@ function updateEnemyBullets(world, dt) {
   const { w, h } = world.arena;
   for (const b of world.eBullets) {
     b.life -= dt;
+    b.age = (b.age ?? 0) + dt;
+    // 追踪弹：慢慢转向最近的玩家，逼你走位而不是原地微调
+    if (b.homing) {
+      let best = null;
+      let bestD = Infinity;
+      for (const p of world.players) {
+        if (p.down) continue;
+        const d = (p.x - b.x) ** 2 + (p.y - b.y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = p;
+        }
+      }
+      if (best && b.age < 2.2) {
+        const want = Math.atan2(best.y - b.y, best.x - b.x);
+        const cur = Math.atan2(b.vy, b.vx);
+        let diff = want - cur;
+        while (diff > Math.PI) diff -= TAU;
+        while (diff < -Math.PI) diff += TAU;
+        const turn = clamp(diff, -b.homing * dt, b.homing * dt);
+        const sp = Math.hypot(b.vx, b.vy);
+        b.vx = Math.cos(cur + turn) * sp;
+        b.vy = Math.sin(cur + turn) * sp;
+      }
+    }
     b.x += b.vx * dt;
     b.y += b.vy * dt;
-    if (b.x < -20 || b.x > w + 20 || b.y < -20 || b.y > h + 20) b.life = 0;
+    if (b.x < -30 || b.x > w + 30 || b.y < -30 || b.y > h + 30) b.life = 0;
+
     for (const p of world.players) {
-      if (p.down || p.iframe > 0) continue;
+      if (p.down) continue;
       const dx = p.x - b.x;
       const dy = p.y - b.y;
-      const rr = p.radius + b.r;
-      if (dx * dx + dy * dy <= rr * rr) {
-        b.life = 0;
-        damagePlayer(world, p, b.damage, b.x, b.y);
-        break;
+      const d2 = dx * dx + dy * dy;
+      if (p.iframe <= 0) {
+        const rr = p.radius + b.r;
+        if (d2 <= rr * rr) {
+          b.life = 0;
+          damagePlayer(world, p, b.damage, b.x, b.y);
+          break;
+        }
+      }
+      // 擦弹：贴着子弹走有收益（东方那套）
+      if (!b.grazed && d2 <= (GRAZE.radius + b.r) ** 2) {
+        b.grazed = true;
+        p.graze += GRAZE.perBullet;
+        p.grazeCharge += GRAZE.perBullet;
+        p.grazeFlash = 0.3;
+        ev(world, 'graze', { id: p.id, x: b.x, y: b.y });
+        if (p.grazeCharge >= GRAZE.chargeNeeded) {
+          p.grazeCharge = 0;
+          p.charges = Math.min(1 + Math.max(0, p.stats.dashCharges), p.charges + 1);
+          // 擦弹给的护盾自带容量：不依赖"反射装甲"那张卡
+          p.stats.shieldMax = Math.max(p.stats.shieldMax, 12);
+          p.shield = Math.min(p.stats.shieldMax, p.shield + 12);
+          p.iframe = Math.max(p.iframe, 0.35);
+          ev(world, 'grazeBonus', { id: p.id, x: p.x, y: p.y });
+        }
       }
     }
   }

@@ -6,6 +6,7 @@ import { createInput } from './input.js';
 import { createRenderer } from './render.js';
 import { createAudio } from './audio.js';
 import { createVoice } from './voice.js';
+import { createHints } from './hints.js';
 import { createBot } from './bot.js';
 import { pickCard as pickSmartCard } from './harness.js';
 
@@ -21,6 +22,8 @@ const voice = createVoice(
   () => audio.context,
   () => audio.bus
 );
+// 侧边操作提示面板（静态按键 + 实时 Boss 血条 / 擦弹充能）
+const hints = createHints(document.getElementById('hints'));
 
 const CARD_KEYS = { Digit1: 0, Digit2: 1, Digit3: 2, Digit8: 0, Digit9: 1, Digit0: 2 };
 
@@ -114,12 +117,12 @@ function titleScreen() {
     <h1>NEON <span>CORE</span></h1>
     <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
     <ul class="keys">
-      <li><b>单人</b>：WASD 移动 · 鼠标瞄准 · 左键射击 · 空格冲刺</li>
-      <li><b>双人 P1</b>：WASD + 鼠标 + 左键 + 空格</li>
-      <li><b>双人 P2</b>：<b>I J K L</b> 移动 · <b>方向键</b> 瞄准 · <b>分号 ;</b> 射击 · <b>回车</b> 冲刺</li>
-      <li>武器：<b>1</b>/<b>2</b>（P1）· <b>8</b>/<b>9</b>（P2） &nbsp;|&nbsp; 强化卡：<b>1 2 3</b>（P1）· <b>8 9 0</b>（P2）</li>
-      <li><b>Esc</b> 暂停 &nbsp;·&nbsp; <b>M</b> 静音 &nbsp;·&nbsp; <b>V</b> 机器人播报 &nbsp;·&nbsp; <b>G</b> AI 托管</li>
+      <li><b>单人</b>：WASD + 鼠标 + 空格冲刺</li>
+      <li><b>P2</b>：<b>IJKL</b> 移动 · <b>方向键</b> 瞄准 · <b>分号</b> 射击 · <b>回车</b> 冲刺</li>
+      <li>换武器 <b>1</b>/<b>2</b>（P2 用 <b>8</b>/<b>9</b>） · 选卡 <b>1 2 3</b>（P2 用 <b>8 9 0</b>）</li>
+      <li><b>Esc</b> 暂停 · <b>M</b> 静音 · <b>V</b> 播报 · <b>G</b> AI 托管</li>
     </ul>
+    <p class="hint">每 5 波来一个<b>弹幕核心</b>：贴着弹幕走能攒<b>擦弹充能</b>，满了补冲刺</p>
     <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
     <p class="hint">按 <b>回车</b> 单人 &nbsp;·&nbsp; 按 <b>Tab</b> 本地双人 &nbsp;·&nbsp; 或点击这里单人开始</p>
   `);
@@ -281,6 +284,7 @@ function frame(now) {
         else if (e.type === 'playerRevived') voice.announce('revive', { now: world.time });
         else if (e.type === 'allDown') voice.announce('lost', { now: world.time, force: true });
         else if (e.type === 'jackpot') voice.announce('jackpot', { now: world.time, force: true });
+        else if (e.type === 'bossSpawn') voice.announce('boss', { now: world.time, force: true });
       }
       acc -= STEP;
       guard++;
@@ -307,6 +311,7 @@ function frame(now) {
 
   renderer.draw(world, { mouse: input.pos });
   updateHud();
+  hints.update(world);
 }
 
 function attachBot(autoPick = true) {
@@ -388,6 +393,13 @@ window.NEON = {
     const p = world.players[0];
     return triggerProc(world, p, { x: p.x, y: p.y });
   },
+  /** 调试弹幕：立刻召一个 Boss 到场上（试弹幕/截图用） */
+  spawnBoss(wave = Math.max(5, world.wave)) {
+    world.wave = wave;
+    const at = world.time + 0.05;
+    world.spawnQueue.push({ type: 'boss', at, scale: { hp: 1, speed: 1, damage: 1 } });
+    return true;
+  },
   debug() {
     return {
       mode,
@@ -400,6 +412,11 @@ window.NEON = {
       enemies: world.enemies.length,
       bullets: world.bullets.length,
       particles: world.particles.length,
+      eBullets: world.eBullets.length,
+      boss: (() => {
+        const b = world.enemies.find((e) => e.boss);
+        return b ? { hp: Math.round(b.hp), hpMax: Math.round(b.hpMax), phase: b.pattern?.phase ?? 0 } : null;
+      })(),
       jackpotLife: +world.jackpot.life.toFixed(2),
       procRate: world.procRate ?? 0.001,
       cards: world.cardChoices.map((l) => l.slice()),
@@ -413,6 +430,8 @@ window.NEON = {
         down: p.down,
         kills: p.statsRun.kills,
         jackpots: p.jackpots,
+        graze: p.graze,
+        grazeCharge: Math.round(p.grazeCharge),
         accuracy: p.statsRun.shots ? +(p.statsRun.hits / p.statsRun.shots).toFixed(3) : 0,
         cards: p.stats.taken.length,
         aim: +p.aim.toFixed(2),

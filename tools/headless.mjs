@@ -20,9 +20,10 @@ const seconds = Number(process.argv[3] ?? 12);
 const keepOpen = process.argv.includes('--keep-open');
 const procArg = process.argv.find((a) => a === '--proc' || a.startsWith('--proc='));
 const procRate = procArg ? (procArg.includes('=') ? Number(procArg.split('=')[1]) : 1) : null;
+const wantBoss = process.argv.includes('--boss');
 const PORT = Number(process.env.NEON_PORT ?? 8787);
 const DEBUG_PORT = 9222 + (mode === 'coop' ? 1 : 0);
-const OUT = join(root, `headless-${mode}${procRate !== null ? '-proc' : ''}.png`);
+const OUT = join(root, `headless-${mode}${procRate !== null ? '-proc' : wantBoss ? '-boss' : ''}.png`);
 
 const EDGE_CANDIDATES = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -168,15 +169,21 @@ async function main() {
     await evalJs(`window.NEON.setProcRate(${procRate}); true`);
     console.error(`[headless] 特殊攻击触发率临时设为 ${(procRate * 100).toFixed(2)}%`);
   }
+  if (wantBoss) {
+    await evalJs('window.NEON.spawnBoss(5); window.NEON.setSpeed(1); true');
+    console.error('[headless] 已召出弹幕 Boss');
+  }
   console.error(`[headless] ${mode} 模式开打，跑 ${seconds}s ...`);
 
   const t0 = Date.now();
   let shotForProc = false;
+  let peakEBullets = 0;
   while ((Date.now() - t0) / 1000 < seconds) {
-    await sleep(procRate !== null ? 120 : 1000);
+    await sleep(procRate !== null ? 120 : wantBoss ? 250 : 1000);
     const d = await evalJs('JSON.stringify(window.NEON.debug())');
     const s = JSON.parse(d);
-    if (procRate === null) {
+    peakEBullets = Math.max(peakEBullets, s.eBullets ?? 0);
+    if (procRate === null && !wantBoss) {
       console.error(
         `[headless] t=${((Date.now() - t0) / 1000).toFixed(0)}s wave=${s.wave} kills=${s.kills} 玩家=${s.players
           .map((p) => `${p.name}:hp${p.hp}${p.down ? '(DOWN)' : ''}`)
@@ -187,6 +194,12 @@ async function main() {
     if (procRate !== null && !shotForProc && s.jackpotLife > 0.15) {
       shotForProc = true;
       console.error(`[headless] 捕获到超载特效（剩余 ${s.jackpotLife}s），立即截图`);
+      break;
+    }
+    // 弹幕最密的时候截图，这样才看得到"东方那味"
+    if (wantBoss && !shotForProc && (s.eBullets ?? 0) >= 55) {
+      shotForProc = true;
+      console.error(`[headless] 弹幕密度到 ${s.eBullets} 发，立即截图`);
       break;
     }
     if (s.mode === 'over') {
@@ -202,6 +215,7 @@ async function main() {
 
   console.error(`\n[headless] 截图已保存: ${OUT}`);
   console.error(`[headless] 终局: ${JSON.stringify(final.players)}`);
+  console.error(`[headless] 弹幕峰值: ${peakEBullets} 发`);
   if (errors.length) {
     console.error(`[headless] ❌ 页面报错 ${errors.length} 条:`);
     for (const e of errors.slice(0, 5)) console.error('   - ' + e);

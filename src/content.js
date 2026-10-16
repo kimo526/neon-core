@@ -71,6 +71,16 @@ export const ENEMY_TYPES = {
   runner: { hp: 15, radius: 8, speed: 205, accel: 1500, damage: 7, color: '#ffe066', lifeOnHit: 0.02 },
   tank: { hp: 135, radius: 21, speed: 62, accel: 320, damage: 19, color: '#ff7a4d', lifeOnHit: 0.03 },
   turret: { hp: 62, radius: 15, speed: 0, accel: 0, damage: 11, color: '#ff5cad', lifeOnHit: 0.02, ranged: true },
+  // 弹幕 Boss：慢速游走 + 成体系的弹幕，每 5 波来一个
+  boss: { hp: 620, radius: 34, speed: 46, accel: 280, damage: 26, color: '#b04dff', ranged: true, boss: true, lifeOnHit: 0.03 },
+};
+
+/** 弹幕参数：擦弹判定范围 / 每点擦弹给多少充能 / 擦弹衰减 */
+export const GRAZE = {
+  radius: 26, // 子弹离机体多近算擦弹（比碰撞半径 12 大一圈）
+  perBullet: 1,
+  chargeNeeded: 45, // 攒满一次给什么（见 sim.js）
+  decay: 6, // 每秒衰减
 };
 
 // 敌人成长：血量按指数（越到后面越肉），伤害按 2.5%/波（慢速复利，避免后期一碰就死）
