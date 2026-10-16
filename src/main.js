@@ -454,6 +454,17 @@ window.addEventListener('blur', () => {
   }
 });
 
+// 部署了新版本、新 Service Worker 接管后，当前页面跑的还是旧 JS（可能出现
+// "文件明明改对了、浏览器还在报旧错"）。刷新一次让页面和新缓存对齐。
+if ('serviceWorker' in navigator) {
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+}
+
 // 切到别的标签页时停掉音乐（省电，也避免"后台还在响"）
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) music.suspend();
