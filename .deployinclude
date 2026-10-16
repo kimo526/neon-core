@@ -1,0 +1,8 @@
+# NEON CORE 静态站点清单（给 gh-pages / 静态托管用）
+# 这些是游戏运行所需的全部文件，其余（tools/ tests/ *.cmd）都不用上传。
+index.html
+style.css
+sw.js
+manifest.webmanifest
+src/
+assets/

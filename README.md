@@ -3,9 +3,9 @@
 一个"热管理驱动"的机甲 roguelite 竞技场，支持**本地双人合作**、**弹幕 Boss** 和**极限模式（不回血）**。纯 JS + Canvas，没有依赖、没有构建步骤、没有素材文件。
 
 ```
-双击 start.cmd         # 本机玩
-双击 share.cmd         # 局域网：手机连同一个 WiFi，扫码就进
-双击 share-online.cmd  # 公网：手机 4G/5G 也能开（临时地址，每次重启会变）
+双击 分享给朋友.cmd     # 公网分享：手机 4G/5G 也能开（临时地址，窗口开着就一直有效）
+双击 start.cmd          # 本机玩
+双击 share.cmd          # 局域网：手机连同一个 WiFi，扫码就进
 ```
 
 > ES module 在 `file://` 下会被浏览器 CORS 拦掉，所以必须走 http。上面几个脚本都包好了这一步。
@@ -38,6 +38,39 @@ git branch -M main
 git push -u origin main
 # 然后仓库 Settings → Pages → Source 选 "Deploy from a branch" → main / (root)
 ```
+
+## 固定地址（永久）
+
+`分享给朋友.cmd` 给的是**临时**地址（重启就变）。想要一个永久、随时能发的链接，二选一：
+
+**A. Netlify Drop —— 不用命令行，2 分钟**
+
+1. 浏览器打开 <https://app.netlify.com/drop>
+2. 用邮箱或 GitHub 登录一次（只有这一步需要你）
+3. 把 `C:\Users\HuaWei\Games\neon-core` 这个**文件夹**直接拖到网页中间的上传区
+4. 等十几秒，它会给你一个 `https://xxxx.netlify.app` 的地址 —— 这就是永久的了
+5. 想改名：Site settings → Change site name
+
+上传后 Netlify 会自动识别这是静态站点，不需要填构建命令。以后想更新，把文件夹再拖一次即可。
+
+**B. GitHub Pages —— 有 git 基础的话**
+
+先在本机初始化并推上去（仓库需要你先在 GitHub 上建一个空的）：
+
+```bash
+cd C:/Users/HuaWei/Games/neon-core
+git remote add origin https://github.com/<你的用户名>/neon-core.git
+git branch -M main
+git push -u origin main
+```
+
+然后仓库 **Settings → Pages → Source** 选 `Deploy from a branch`，分支选 `main`、目录选 `/(root)`，保存。等 1 分钟，访问
+`https://<你的用户名>.github.io/neon-core/`。
+
+> 只有游戏本体需要上传（`index.html`、`style.css`、`sw.js`、`manifest.webmanifest`、`src/`、`assets/`），
+> 见 `.deployinclude`。`tools/`、`tests/`、`*.cmd` 是开发用的，传不传都能跑。
+>
+> 两种方式都是 HTTPS，所以手机上**可以"添加到主屏幕"当 App 用，也能离线玩**。
 
 放上去之后会自动获得 PWA 能力（**离线可玩、可"添加到主屏幕"**）：`manifest.webmanifest` + `sw.js` 已经把全部资源缓存好了，断网也能开。
 
