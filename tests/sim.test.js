@@ -159,7 +159,7 @@ test('冲刺提供无敌帧并且会进入冷却', () => {
 test('卡片：推进过载缩短冲刺冷却', () => {
   const w = createWorld(13);
   const before = p1(w).stats.dashCooldown;
-  assert.ok(chooseCard(w, 'thruster'));
+  assert.ok(chooseCard(w, 'thruster', null, { allowAny: true }));
   assert.ok(p1(w).stats.dashCooldown < before);
   assert.equal(w.phase, 'play', '选完卡应该恢复战斗');
 });
@@ -168,7 +168,7 @@ test('卡片：二段推进让冲刺能连着放两次，然后才吃冷却', ()
   const w = createWorld(17);
   w.enemies.length = 0;
   w.spawnQueue.length = 0;
-  chooseCard(w, 'doublejump');
+  chooseCard(w, 'doublejump', null, { allowAny: true });
   const input = { ...makeInput(), dash: true, moveX: 1, moveY: 0, aimX: 900, aimY: 270 };
   const idle = { ...input, dash: false };
   assert.equal(p1(w).charges, 2, '拿了二段推进应该一开始就有 2 段充能');
@@ -214,7 +214,7 @@ test('卡片：复合装甲提高上限并立刻修复', () => {
   const w = createWorld(19);
   p1(w).hp = 40;
   const max0 = p1(w).stats.hpMax;
-  chooseCard(w, 'armor');
+  chooseCard(w, 'armor', null, { allowAny: true });
   assert.equal(p1(w).stats.hpMax, max0 + 25);
   assert.equal(p1(w).hp, 65);
 });
@@ -223,7 +223,7 @@ test('卡片：弹射协议让子弹撞墙反弹而不是消失', () => {
   const w = createWorld(23);
   w.enemies.length = 0;
   w.spawnQueue.length = 0;
-  chooseCard(w, 'ricochet');
+  chooseCard(w, 'ricochet', null, { allowAny: true });
   p1(w).x = 200;
   p1(w).y = 200;
   const input = { ...makeInput(), aimX: 0, aimY: 200, firing: true }; // 朝左墙打
@@ -239,7 +239,7 @@ test('卡片：相位脉冲在冲刺穿过敌人时造成伤害', () => {
   const e = placeEnemy(w, 700, 270);
   p1(w).x = 600;
   p1(w).y = 270;
-  chooseCard(w, 'pulse');
+  chooseCard(w, 'pulse', null, { allowAny: true });
   const hp0 = e.hp;
   const input = { ...makeInput(), dash: true, moveX: 1, moveY: 0 };
   for (let i = 0; i < 30; i++) step(w, input, STEP);
@@ -254,8 +254,8 @@ test('冲刺构筑：相位刀锋放大所有冲刺伤害', () => {
     const e = placeEnemy(w, 700, 270);
     p1(w).x = 600;
     p1(w).y = 270;
-    chooseCard(w, 'pulse');
-    if (card) chooseCard(w, card);
+    chooseCard(w, 'pulse', null, { allowAny: true });
+    if (card) chooseCard(w, card, null, { allowAny: true });
     for (let i = 0; i < 30; i++) step(w, dashInput(), STEP);
     return e.hpMax - e.hp;
   };
@@ -270,7 +270,7 @@ test('冲刺构筑：熔核尾迹在冲刺路径上留下持续伤害区', () =>
   const e = placeEnemy(w, 505, 270, { hp: 99999, hpMax: 99999 });
   p1(w).x = 500;
   p1(w).y = 270;
-  chooseCard(w, 'coretrail');
+  chooseCard(w, 'coretrail', null, { allowAny: true });
   assert.equal(w.trails.length, 0);
   step(w, dashInput(), STEP);
   assert.equal(w.trails.length, 1, '冲刺应该留下尾迹');
@@ -284,7 +284,7 @@ test('冲刺构筑：急停爆发打出一圈弹幕', () => {
   const w = createWorld(63);
   w.enemies.length = 0;
   w.spawnQueue.length = 0;
-  chooseCard(w, 'burststop');
+  chooseCard(w, 'burststop', null, { allowAny: true });
   let maxBullets = 0;
   for (let i = 0; i < 20; i++) {
     step(w, dashInput(), STEP);
@@ -296,7 +296,7 @@ test('冲刺构筑：急停爆发打出一圈弹幕', () => {
 test('冲刺构筑：连锁冲刺让击杀返还冷却', () => {
   const w = createWorld(64);
   const e = placeEnemy(w, 300, 270, { hp: 1 });
-  chooseCard(w, 'chaindash');
+  chooseCard(w, 'chaindash', null, { allowAny: true });
   // 先把充能打空、进入冷却
   step(w, dashInput(), STEP);
   for (let i = 0; i < 12; i++) step(w, makeInput(), STEP);
@@ -312,7 +312,7 @@ test('冲刺构筑：反射装甲给护盾，护盾优先抵挡伤害', () => {
   const w = createWorld(65);
   w.enemies.length = 0;
   w.spawnQueue.length = 0;
-  chooseCard(w, 'reflectplate');
+  chooseCard(w, 'reflectplate', null, { allowAny: true });
   step(w, dashInput(), STEP);
   assert.ok(p1(w).shield > 0, '冲刺应该获得护盾');
   const shield0 = p1(w).shield;
@@ -332,7 +332,7 @@ test('冲刺构筑：破空在起步瞬间震住身边敌人，被震住的敌�
   const e = placeEnemy(w, 545, 270, { hp: 9999, hpMax: 9999, speed: 160, accel: 900 });
   p1(w).x = 500;
   p1(w).y = 270;
-  chooseCard(w, 'voidbreak');
+  chooseCard(w, 'voidbreak', null, { allowAny: true });
   step(w, dashInput(), STEP);
   assert.ok(e.stunned > 0, '冲刺起步时就该震住身边的敌人（不能等飞出去再判定）');
   const x0 = e.x;
@@ -400,7 +400,7 @@ test('特殊攻击：长跑统计上接近 0.1%', () => {
 
 test('卡片：残骸回收让击杀回血', () => {
   const w = createWorld(31);
-  chooseCard(w, 'killheal');
+  chooseCard(w, 'killheal', null, { allowAny: true });
   const e = placeEnemy(w, 300, 270);
   e.hp = 1;
   p1(w).hp = 50;

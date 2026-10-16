@@ -1,5 +1,7 @@
-﻿// 强化卡池：不做数值膨胀，尽量做"改变玩法"的词条。
-import { PLAYER, WEAPONS, TUNING } from './content.js';
+// 强化卡池：不做数值膨胀，尽量做"改变玩法"的词条。
+import { EXTREME, PLAYER, WEAPONS, TUNING, grantHeal } from './content.js';
+
+const EXTREME_OVERFLOW = EXTREME.overflowShieldCap;
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -178,7 +180,10 @@ export const CARDS = [
     id: 'killheal',
     tag: 'chassis',
     name: '残骸回收',
-    desc: (s) => `击杀恢复 ${((s.lifeOnKill + 0.03) * 100).toFixed(0)} 点结构值`,
+    desc: (s, world) =>
+      world?.noHeal
+        ? `击杀转成护盾（极限模式不回血，最多 ${EXTREME_OVERFLOW}）`
+        : `击杀恢复 ${((s.lifeOnKill + 0.03) * 100).toFixed(0)} 点结构值`,
     weight: 0.9,
     apply: (s) => {
       s.lifeOnKill += 0.03;
@@ -188,11 +193,13 @@ export const CARDS = [
     id: 'armor',
     tag: 'chassis',
     name: '复合装甲',
-    desc: () => '结构上限 +25，并立即修复 25',
+    desc: (s, world) =>
+      `结构上限 +25${world?.noHeal ? '（极限模式：不回复当前值）' : '，并立即修复 25'}`,
     weight: 1,
     apply: (s, world, player) => {
       s.hpMax += 25;
-      if (player) player.hp = Math.min(s.hpMax, player.hp + 25);
+      // 走统一入口：极限模式不会真的回血
+      if (player && world) grantHeal(world, player, 25);
     },
   },
   {
@@ -227,8 +234,8 @@ export const CARDS = [
   },
 ];
 
-export function cardText(card, stats) {
-  return typeof card.desc === 'function' ? card.desc(stats) : card.desc;
+export function cardText(card, stats, world = null) {
+  return typeof card.desc === 'function' ? card.desc(stats, world) : card.desc;
 }
 
 /** 从卡池里按权重抽 n 张不重复的卡 */

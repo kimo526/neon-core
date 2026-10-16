@@ -34,11 +34,12 @@ export function runHeadless({
   botOpts = {},
   bot2Opts = { quantizedAim: true },
   playerCount = 1,
+  mode = 'standard',
   onFrame = null,
   pickCards = true,
   revive = false,
 } = {}) {
-  const world = createWorld(seed, { playerCount });
+  const world = createWorld(seed, { playerCount, mode });
   const bots = [
     createBot({ seed, index: 0, ...botOpts }),
     createBot({ seed: seed + 991, index: 1, ...bot2Opts }),
@@ -93,6 +94,8 @@ export function runHeadless({
       died: world.dead,
       revives,
       playerCount,
+      mode: world.mode,
+      noHeal: world.noHeal,
       wave: world.wave,
       wavesCleared: world.stats.waves,
       kills: world.stats.kills,

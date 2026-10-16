@@ -1,4 +1,4 @@
-// 弹幕玩法（雷霆战机 / 东方那套）的回归测试
+﻿// 弹幕玩法（雷霆战机 / 东方那套）的回归测试
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ARENA, GRAZE, STEP } from '../src/content.js';

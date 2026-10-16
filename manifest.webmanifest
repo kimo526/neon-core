@@ -1,0 +1,19 @@
+{
+  "name": "NEON CORE // 解限核心",
+  "short_name": "NEON CORE",
+  "description": "热管理驱动的机甲 roguelite 竞技场：热量会锁枪、冲刺能穿敌、每 5 波来一个弹幕核心。支持本地双人与极限模式。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#06070d",
+  "theme_color": "#06070d",
+  "lang": "zh-CN",
+  "categories": ["games"],
+  "icons": [
+    { "src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [{ "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}

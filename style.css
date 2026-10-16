@@ -17,6 +17,10 @@ html, body {
   font-family: "Cascadia Mono", "Consolas", "JetBrains Mono", "Microsoft YaHei", monospace;
   overflow: hidden;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: none;
 }
 
 /* 游戏区 + 侧边提示面板 */
@@ -255,6 +259,31 @@ canvas#game {
 
 .bar > i.hpbar { background: linear-gradient(90deg, #2fd6a0, #7ef7c8); }
 .bar > i.heatbar { background: linear-gradient(90deg, #4ff0ff, #ff5a3c); }
+
+/* 极限模式：血量不可再生，视觉上一眼可辨 */
+body.extreme .bar > i.hpbar { background: linear-gradient(90deg, #ff4d6d, #ff9eb0); }
+body.extreme .hud-player .value.hp { color: #ff8fa3; }
+.value.hp.critical {
+  color: #ff2b4a !important;
+  animation: hpwarn 0.9s ease-in-out infinite;
+}
+
+@keyframes hpwarn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.noregen {
+  margin-left: 5px;
+  padding: 0 3px;
+  border: 1px solid #ff4d6d;
+  color: #ff8fa3;
+  font-size: 0.85em;
+  font-weight: 400;
+}
+
+body.extreme #hints .hints-head { color: #ff4d6d; }
+body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px #ff4d6d; }
 
 /* ---------- 遮罩层 ---------- */
 #overlay {

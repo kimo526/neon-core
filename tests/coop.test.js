@@ -1,4 +1,4 @@
-// 本地双人（合作）机制的回归测试
+﻿// 本地双人（合作）机制的回归测试
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ARENA, COOP, STEP, TUNING } from '../src/content.js';

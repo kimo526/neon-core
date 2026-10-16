@@ -1,12 +1,56 @@
 # NEON CORE // 解限核心
 
-一个"热管理驱动"的机甲 roguelite 竞技场，支持**本地双人合作**。纯 JS + Canvas，没有依赖、没有构建步骤、没有素材文件。
+一个"热管理驱动"的机甲 roguelite 竞技场，支持**本地双人合作**、**弹幕 Boss** 和**极限模式（不回血）**。纯 JS + Canvas，没有依赖、没有构建步骤、没有素材文件。
 
 ```
 双击 start.cmd       # 或者：  node tools/serve.mjs   然后打开 http://127.0.0.1:8787/
 ```
 
 > ES module 在 `file://` 下会被浏览器 CORS 拦掉，所以必须走 http。`start.cmd` 已经包好了这一步。
+>
+> 手机上直接开同一个地址就能玩（左半屏拖动移动、右半屏点击冲刺、子弹自动索敌）。
+
+## 直接分享给别人玩
+
+这游戏是**纯静态站点**——`index.html` + `src/*.js` + 两个图标，没有任何后端。所以任何静态托管都能直接放上去：
+
+| 方式 | 操作 | 得到 |
+| --- | --- | --- |
+| **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 一个 https 链接，最快 |
+| **Cloudflare Pages** | 连接仓库或直接上传，构建命令留空、输出目录填 `/` | 一个 https 链接 |
+| **GitHub Pages** | 见下 | `https://<你>.github.io/neon-core/` |
+| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`），它会打印出 `http://192.168.x.x:8787/` | 同一个 WiFi 下，朋友/手机直接开这个链接 |
+
+GitHub Pages 的话：
+
+```bash
+cd C:/Users/HuaWei/Games/neon-core
+git remote add origin https://github.com/<你的用户名>/neon-core.git
+git branch -M main
+git push -u origin main
+# 然后仓库 Settings → Pages → Source 选 "Deploy from a branch" → main / (root)
+```
+
+放上去之后会自动获得 PWA 能力（**离线可玩、可"添加到主屏幕"**）：`manifest.webmanifest` + `sw.js` 已经把全部资源缓存好了，断网也能开。
+
+**URL 参数**（方便分享特定玩法，不用教对方点菜单）：
+
+```
+?mode=extreme        极限模式（不回血）
+?players=2           本地双人
+?autostart=1         跳过标题直接开打
+```
+
+例：`https://你的地址/?mode=extreme&autostart=1`
+
+## 玩法模式
+
+| 模式 | 入口 | 规则 |
+| --- | --- | --- |
+| 标准 | `回车` | 正常回血：nanoswarm 每秒回、残骸回收击杀回、复合装甲立刻修 |
+| **极限** | `X`（双人极限 `C`） | **结构值不可回复**。所有回血一律转成护盾（上限 30），大奖也只给护盾 + 3 秒无敌 |
+
+极限模式里"回血卡"不是废卡——它们变成护盾来源；但你也**绝对不可能靠它们续命**。AI 实测：标准模式跑 200 秒还满场飞，极限模式平均 112 秒就撑不住了。血量低于 30% 时 HUD 会闪红、音效会给心跳声。
 
 ## 操作
 
@@ -21,7 +65,9 @@
 
 通用：`Esc` 暂停 · `M` 静音 · `V` 机器人播报开关 · `G` 让 AI 接管（再按一次交还）
 
-标题界面按 **回车** 单人、按 **Tab** 本地双人。
+手机：左半屏拖动 = 移动（虚拟摇杆），右半屏点一下 = 冲刺，子弹**自动索敌**开火。触屏下不做手动瞄准——你只负责走位，这正好对上"擦弹/走位"的核心玩法。
+
+标题界面按 **回车** 单人、**Tab** 本地双人、**X** 极限、**C** 双人极限。
 
 ## 玩什么
 
@@ -69,7 +115,7 @@
 ## 代码结构
 
 ```
-src/content.js    数值与内容：手感参数、武器、敌人、合作缩放、特殊攻击概率、擦弹参数
+src/content.js    数值与内容：手感参数、武器、敌人、合作缩放、特殊攻击概率、擦弹参数、模式定义
 src/patterns.js   弹幕模式库：螺旋/环形/自机狙/弹墙/米字/追踪 + Boss 分阶段时间线
 src/upgrades.js   强化卡池 + 抽卡（含冲刺构筑 6 张）
 src/sim.js        纯逻辑模拟：step(world, inputs, dt)，不碰 DOM
@@ -79,10 +125,12 @@ src/render.js     Canvas 渲染（多人、热量色偏、尾迹、弹幕贴图�
 src/hints.js      侧边操作提示面板（静态按键 + 实时 Boss 血条/擦弹充能）
 src/audio.js      音效合成 + 混音总线
 src/voice.js      共振峰机器人播报
-src/input.js      键鼠 → input 对象（单人 / 双人两套映射）
-src/main.js       主循环、多玩家 HUD、界面状态机、window.NEON 调试钩子
-tests/            51 个测试：机制、边界、合作、冲刺构筑、特殊攻击、弹幕、平衡、长跑稳定性
-tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图验收
+src/input.js      键鼠 / 触屏 → input 对象（单人 / 双人 / 触屏三套映射）
+src/main.js       主循环、多玩家 HUD、界面状态机、PWA 注册、window.NEON 调试钩子
+sw.js             离线缓存（Service Worker）
+manifest.webmanifest + assets/   PWA 清单与图标
+tests/            62 个测试：机制、边界、合作、冲刺构筑、特殊攻击、弹幕、极限模式、平衡、长跑
+tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图验收 / 图标生成
 ```
 
 关键设计：**逻辑层是纯的**。`step(world, inputs, dt)` 只依赖传入的 world 和输入，人类和 AI 走同一个 input 接口，所以 AI 跑出来的平衡数据对人类有意义，也能跑"两个 AI 合作"来验证双人难度。
@@ -90,16 +138,17 @@ tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图�
 ## 开发
 
 ```bash
-node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js   # 51 个测试
+node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js tests/extreme.test.js   # 62 个测试
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300        # 单人平衡台
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2      # 双人平衡台
 node tools/proc-rate.mjs 180 4                     # 实测特殊攻击多久出一次
 node tools/headless.mjs coop 14                    # 无头开一局双人 + 截图 + 报错检查
 node tools/headless.mjs solo 30 --boss             # 召出弹幕 Boss，弹幕最密时截图
 node tools/headless.mjs solo 20 --proc=0.05        # 强制特殊攻击，专截红黑特效
+node tools/make-icon.mjs                           # 重新生成 PWA 图标（零依赖，手写 PNG 编码）
 ```
 
-改手感只需要动 `src/content.js` 里的 `TUNING` / `WEAPONS` / `ENEMY_TYPES` / `COOP` / `GRAZE`；想加新弹幕就往 `src/patterns.js` 的 `PATTERNS` 里加一条（`{ name, cd, fn }`）。
+改手感只需要动 `src/content.js` 里的 `TUNING` / `WEAPONS` / `ENEMY_TYPES` / `COOP` / `GRAZE` / `MODES`；想加新弹幕就往 `src/patterns.js` 的 `PATTERNS` 里加一条（`{ name, cd, fn }`）。
 
 `tools/headless.mjs` 是给自己用的验收工具：它用 Edge 的 DevTools 协议开无头页面、点开始、让 AI 托管、抓页面报错、最后截一张 1280×760 的实机图（`headless-*.png`）。不需要装 Playwright——Node 自带 WebSocket，走 CDP 就够了。
 
@@ -113,7 +162,8 @@ AI（会预判瞄准、会拉距离、热量到 72% 主动松手；P2 用"方向
 | --- | --- | --- | --- | --- |
 | 单人 | 10.6 | 194 | 97% | 0% |
 | 双人 | 8.5 | 233 | 83% | 13% |
+| **极限单人** | — | — | — | 同种子下 112 秒 vs 标准 200 秒 |
 
-双人的 13% 阵亡率基本来自弹幕核心——**Boss 是这游戏目前唯一能真正杀死 AI 的东西**，说明弹幕那套压力是有效的。
+双人的 13% 阵亡率基本来自弹幕核心——**Boss 是这游戏目前唯一能真正杀死 AI 的东西**，说明弹幕那套压力是有效的。极限模式则直接砍掉了"续航"这个维度：AI 在同种子下从 200 秒掉到 112 秒，人类会更明显。
 
 人类成绩通常会低于这个数（AI 的预判瞄准很准），所以能活过 AI 说明打得不错。目前 AI 在 300 秒内基本不会死，也就是说**难度还有上调空间**——想加难度就改 `COOP.enemyBonus` 和 `ENEMY_SCALING`。

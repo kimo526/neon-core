@@ -28,7 +28,7 @@ const hints = createHints(document.getElementById('hints'));
 const CARD_KEYS = { Digit1: 0, Digit2: 1, Digit3: 2, Digit8: 0, Digit9: 1, Digit0: 2 };
 
 let world = createWorld((Math.random() * 1e9) | 0, { playerCount: 1 });
-let mode = 'title'; // title | running | upgrade | over | paused | dying
+let uiMode = 'title'; // title | running | upgrade | over | paused | dying
 let acc = 0;
 let speed = 1;
 let last = performance.now();
@@ -49,7 +49,7 @@ function buildHud() {
     box.style.setProperty('--pc', p.color);
     box.innerHTML = `
       <div class="row"><span class="label">${count > 1 ? p.name + ' · ' : ''}WAVE</span><span class="value wave">1</span></div>
-      <div class="row"><span class="label">HP</span><span class="value hp">100</span></div>
+      <div class="row"><span class="label">HP${world.noHeal ? '<b class="noregen">不回血</b>' : ''}</span><span class="value hp">100</span></div>
       <div class="bar"><i class="hpbar"></i></div>
       <div class="row"><span class="label">HEAT</span><span class="value heat">0%</span></div>
       <div class="bar"><i class="heatbar"></i></div>
@@ -58,6 +58,7 @@ function buildHud() {
       <div class="row"><span class="label">KILLS</span><span class="value kills">0</span></div>
       <div class="row"><span class="label">TIME</span><span class="value time">0.0s</span></div>
       <div class="row"><span class="label">超载</span><span class="value jackpot">0</span></div>
+      <div class="row"><span class="label">擦弹</span><span class="value graze">0</span></div>
     `;
     hudRoot.appendChild(box);
     const q = (sel) => box.querySelector(sel);
@@ -71,6 +72,7 @@ function buildHud() {
       kills: q('.kills'),
       time: q('.time'),
       jackpot: q('.jackpot'),
+      graze: q('.graze'),
       wave: q('.wave'),
     });
   }
@@ -96,6 +98,12 @@ function updateHud() {
     h.time.textContent = `${p.statsRun.timeAlive.toFixed(1)}s`;
     h.jackpot.textContent = p.jackpots;
     h.jackpot.classList.toggle('warn', world.jackpot.life > 0 && world.jackpot.id === p.id);
+    h.graze.textContent = p.graze;
+    // 极限模式：血量是不可再生资源，低了要刺眼
+    if (world.noHeal) {
+      const ratio = p.hp / st.hpMax;
+      h.hp.classList.toggle('critical', ratio <= 0.3 && !p.down);
+    }
   });
 }
 
@@ -112,7 +120,7 @@ function hideOverlay() {
 }
 
 function titleScreen() {
-  mode = 'title';
+  uiMode = 'title';
   setOverlay(`
     <h1>NEON <span>CORE</span></h1>
     <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
@@ -124,23 +132,26 @@ function titleScreen() {
     </ul>
     <p class="hint">每 5 波来一个<b>弹幕核心</b>：贴着弹幕走能攒<b>擦弹充能</b>，满了补冲刺</p>
     <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
-    <p class="hint">按 <b>回车</b> 单人 &nbsp;·&nbsp; 按 <b>Tab</b> 本地双人 &nbsp;·&nbsp; 或点击这里单人开始</p>
+    <p class="hint"><b>回车</b> 单人 &nbsp;·&nbsp; <b>Tab</b> 双人 &nbsp;·&nbsp; <b>X</b> 极限（不回血）&nbsp;·&nbsp; <b>C</b> 双人极限</p>
+    <p class="hint">手机：左半屏拖动移动 · 右半屏点一下冲刺 · 子弹自动索敌</p>
+    <p class="hint">或点击这里开始标准单人</p>
   `);
 }
 
-function startRun(playerCount = 1) {
-  world = createWorld((Math.random() * 1e9) | 0, { playerCount });
+function startRun(playerCount = 1, gameMode = 'standard') {
+  world = createWorld((Math.random() * 1e9) | 0, { playerCount, mode: gameMode });
   input.clear();
   audio.unlock();
   acc = 0;
-  mode = 'running';
+  uiMode = 'running';
   buildHud();
   bot.agents = world.players.map((p) => createBot({ seed: world.seed + p.index * 991, index: p.index }));
   hideOverlay();
+  document.body.classList.toggle('extreme', world.noHeal);
 }
 
 function gameOver() {
-  mode = 'over';
+  uiMode = 'over';
   const rows = world.players
     .map((p) => {
       const acc2 = p.statsRun.shots ? ((p.statsRun.hits / p.statsRun.shots) * 100).toFixed(0) : '0';
@@ -148,21 +159,24 @@ function gameOver() {
       return `<li><b style="color:${p.color}">${p.name}</b> 击杀 ${p.statsRun.kills} · 伤害 ${Math.round(p.statsRun.damage)} · 命中率 ${acc2}% · 存活 ${p.statsRun.timeAlive.toFixed(0)}s<br><span class="dim">${cards}</span></li>`;
     })
     .join('');
+  const extreme = world.noHeal;
   setOverlay(`
     <h1>CORE <span>LOST</span></h1>
-    <p class="sub">核心在第 ${world.wave} 波被打穿。</p>
+    <p class="sub">${extreme ? `极限模式：核心撑到第 ${world.wave} 波。` : `核心在第 ${world.wave} 波被打穿。`}</p>
     <ul class="keys score">${rows}</ul>
-    <p class="hint">合计击杀 <b>${world.stats.kills}</b> · 清波 <b>${world.stats.waves}</b></p>
-    <p class="hint">按 <b>R</b> 或点击这里重开（沿用 ${world.players.length} 人）</p>
+    <p class="hint">合计击杀 <b>${world.stats.kills}</b> · 清波 <b>${world.stats.waves}</b>${
+      extreme ? ` · 极限模式最远到第 <b>${world.wave}</b> 波（不回血，这就是你的成绩）` : ''
+    }</p>
+    <p class="hint">按 <b>R</b> 或点击这里重开（沿用 ${world.players.length} 人${extreme ? ' · 极限' : ''}）</p>
   `);
 }
 
 function pickCard(id, playerId) {
-  if (mode !== 'upgrade') return;
+  if (uiMode !== 'upgrade') return;
   chooseCard(world, id, playerId);
   audio.play([{ type: 'cardPicked' }], world);
   if (world.phase === 'play') {
-    mode = 'running';
+    uiMode = 'running';
     acc = 0;
     hideOverlay();
   } else {
@@ -183,7 +197,7 @@ function renderUpgrade() {
         return `<button class="card" type="button" data-id="${id}" data-pid="${p.id}">
           <div class="tag" style="color:${UPGRADE_TAGS[c.tag].color}">${UPGRADE_TAGS[c.tag].label}</div>
           <div class="name">${c.name}</div>
-          <div class="desc">${cardText(c, p.stats)}</div>
+          <div class="desc">${cardText(c, p.stats, world)}</div>
           <div class="key">按 ${keys[k]} 选择</div>
         </button>`;
       })
@@ -207,7 +221,7 @@ function renderUpgrade() {
 }
 
 function showUpgrade() {
-  mode = 'upgrade';
+  uiMode = 'upgrade';
   renderUpgrade();
 }
 
@@ -225,25 +239,27 @@ function frame(now) {
   }
 
   if (input.takePause()) {
-    if (mode === 'running') {
-      mode = 'paused';
+    if (uiMode === 'running') {
+      uiMode = 'paused';
       setOverlay(`<h1>PAUSED</h1><p class="sub">喘口气。</p><p class="hint">按 <b>Esc</b> 或点击这里继续</p>`);
-    } else if (mode === 'paused') {
-      mode = 'running';
+    } else if (uiMode === 'paused') {
+      uiMode = 'running';
       hideOverlay();
     }
   }
 
   for (const code of input.takePressed()) {
-    if (code === 'KeyG' && (mode === 'running' || mode === 'paused')) {
+    if (code === 'KeyG' && (uiMode === 'running' || uiMode === 'paused')) {
       if (bot.enabled) detachBot();
       else attachBot(true);
       continue;
     }
-    if (mode === 'title' && (code === 'Enter' || code === 'NumpadEnter')) startRun(1);
-    else if (mode === 'title' && code === 'Tab') startRun(2);
-    else if (mode === 'over' && code === 'KeyR') startRun(world.players.length);
-    else if (mode === 'upgrade') {
+    if (uiMode === 'title' && (code === 'Enter' || code === 'NumpadEnter')) startRun(1, 'standard');
+    else if (uiMode === 'title' && code === 'Tab') startRun(2, 'standard');
+    else if (uiMode === 'title' && code === 'KeyX') startRun(1, 'extreme');
+    else if (uiMode === 'title' && code === 'KeyC') startRun(2, 'extreme');
+    else if (uiMode === 'over' && code === 'KeyR') startRun(world.players.length, world.mode);
+    else if (uiMode === 'upgrade') {
       const slot = CARD_KEYS[code];
       if (slot === undefined) continue;
       // 数字键按"谁还空着"分配：1/2/3 永远给 P1，8/9/0 永远给 P2
@@ -261,7 +277,7 @@ function frame(now) {
     }
   }
 
-  if (mode === 'running') {
+  if (uiMode === 'running') {
     acc += dt * speed;
     let guard = 0;
     const stepsAllowed = bot.enabled ? 60 : 5;
@@ -294,11 +310,11 @@ function frame(now) {
   }
   audio.update(world, dt);
 
-  if (mode === 'running' && world.dead) {
-    mode = 'dying';
+  if (uiMode === 'running' && world.dead) {
+    uiMode = 'dying';
     setTimeout(gameOver, 500);
   }
-  if (mode === 'running' && world.phase === 'upgrade') {
+  if (uiMode === 'running' && world.phase === 'upgrade') {
     if (bot.enabled && bot.autoPick) {
       if (bot.cardDelay > 0) bot.cardDelay--;
       else {
@@ -309,7 +325,7 @@ function frame(now) {
     } else showUpgrade();
   }
 
-  renderer.draw(world, { mouse: input.pos });
+  renderer.draw(world, { mouse: input.pos, touchStick: input.touchState });
   updateHud();
   hints.update(world);
 }
@@ -330,16 +346,16 @@ function detachBot() {
 overlay.addEventListener('click', (e) => {
   if (e.target.closest('.card')) return;
   audio.unlock();
-  if (mode === 'title') startRun(1);
-  else if (mode === 'paused') {
-    mode = 'running';
+  if (uiMode === 'title') startRun(1, 'standard');
+  else if (uiMode === 'paused') {
+    uiMode = 'running';
     hideOverlay();
-  } else if (mode === 'over') startRun(world.players.length);
-  else if (mode === 'upgrade') skipRemainingCards(world), (mode = 'running'), hideOverlay();
+  } else if (uiMode === 'over') startRun(world.players.length, world.mode);
+  else if (uiMode === 'upgrade') skipRemainingCards(world), (uiMode = 'running'), hideOverlay();
 });
 window.addEventListener('blur', () => {
-  if (mode === 'running') {
-    mode = 'paused';
+  if (uiMode === 'running') {
+    uiMode = 'paused';
     setOverlay(`<h1>PAUSED</h1><p class="sub">窗口失焦，自动暂停。</p><p class="hint">点击这里继续</p>`);
   }
 });
@@ -348,13 +364,39 @@ buildHud();
 titleScreen();
 requestAnimationFrame(frame);
 
+// URL 参数：方便分享特定玩法 / 直接进游戏
+//   ?mode=extreme        极限模式（不回血）
+//   ?players=2           本地双人
+//   ?autostart=1         跳过标题直接开打
+(() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    const wantExtreme = (q.get('mode') ?? '').toLowerCase() === 'extreme';
+    const wantPlayers = Number(q.get('players') ?? 1) === 2 ? 2 : 1;
+    if (q.get('autostart') === '1' || wantExtreme || wantPlayers === 2) {
+      startRun(wantPlayers, wantExtreme ? 'extreme' : 'standard');
+    }
+  } catch {
+    /* 参数不合法就照常显示标题 */
+  }
+})();
+
+// 注册 Service Worker：可离线玩 + 能"装到桌面"（需要 https 或 localhost）
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      /* 不支持就算了，游戏本体不依赖它 */
+    });
+  });
+}
+
 // 调试/自动化钩子：方便用脚本复现对局、抓状态（浏览器里 window.NEON.debug()）
 window.NEON = {
   get world() {
     return world;
   },
   get mode() {
-    return mode;
+    return uiMode;
   },
   get frameNo() {
     return frameCount;
@@ -402,7 +444,7 @@ window.NEON = {
   },
   debug() {
     return {
-      mode,
+      mode: uiMode,
       frameCount,
       wave: world.wave,
       phase: world.phase,

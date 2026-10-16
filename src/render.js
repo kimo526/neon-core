@@ -131,7 +131,7 @@ export function createRenderer(canvas) {
   const flash = { a: 0, color: '#ff5a3c' };
 
   function draw(world, opts = {}) {
-    const { mouse } = opts;
+    const { mouse, touchStick } = opts;
     const shake = world.screenShake;
     const t = world.time;
     const p = world.player;
@@ -253,8 +253,23 @@ export function createRenderer(canvas) {
       }
     }
 
+    // 触屏虚拟摇杆
+    if (touchStick) {
+      const { ox, oy, x, y, active } = touchStick;
+      ctx.strokeStyle = active ? 'rgba(79, 240, 255, 0.75)' : 'rgba(79, 240, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ox, oy, 46, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, 18, 0, TAU);
+      ctx.fillStyle = active ? 'rgba(79, 240, 255, 0.35)' : 'rgba(79, 240, 255, 0.15)';
+      ctx.fill();
+      ctx.stroke();
+    }
+
     // 瞄准光标：只画 P1 的（多人时 P2 用方向键，不需要鼠标指示）
-    if (mouse && world.players.length <= 1) drawCursor(ctx, mouse, world);
+    if (mouse && world.players.length <= 1 && !touchStick) drawCursor(ctx, mouse, world);
 
     ctx.restore();
 

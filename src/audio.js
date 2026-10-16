@@ -189,6 +189,11 @@ export function createAudio(opts = {}) {
             tone({ type: 'sawtooth', f0: 340, f1: 120, dur: 0.5, gain: 0.26, filter: { freq: 1400 } });
             noise({ dur: 0.45, gain: 0.22, freq: 2600, freqEnd: 300 });
             break;
+          case 'lowHp':
+            // 残血警报：两声闷响，像心跳
+            tone({ type: 'sine', f0: 92, f1: 54, dur: 0.18, gain: 0.24 });
+            setTimeout(() => tone({ type: 'sine', f0: 78, f1: 46, dur: 0.22, gain: 0.18 }), 200);
+            break;
           case 'jackpot': {
             // 0.1% 的大奖：低频轰鸣 + 金属泛音 + 长尾噪声
             tone({ type: 'sine', f0: 90, f1: 34, dur: 1.1, gain: 0.42 });

@@ -86,6 +86,35 @@ export const GRAZE = {
 // 敌人成长：血量按指数（越到后面越肉），伤害按 2.5%/波（慢速复利，避免后期一碰就死）
 export const ENEMY_SCALING = { hp: 1.14, speed: 1.025, damagePerWave: 0.025 };
 
+/** 玩法模式 */
+export const MODES = {
+  standard: { id: 'standard', label: '标准', hp: 100, noHeal: false, color: '#4ff0ff' },
+  // 极限：结构值不可回复（回血一律转成少量护盾），活多久就是你的成绩
+  extreme: { id: 'extreme', label: '极限', hp: 100, noHeal: true, color: '#ff4d6d' },
+};
+
+/** 极限模式下"回血"转成的护盾上限（防止变相续命） */
+export const EXTREME = { overflowShieldCap: 30 };
+
+/**
+ * 唯一允许改玩家血量的入口，放在 content.js 是为了避免 sim ↔ upgrades 循环依赖。
+ * 极限模式（noHeal）下任何回复都不生效，只溢出成少量护盾——所以"回血卡"不是废卡，
+ * 但也绝不会变相续命。
+ */
+export function grantHeal(world, p, amount) {
+  if (!p || amount <= 0 || p.down) return 0;
+  if (!world?.noHeal) {
+    const before = p.hp;
+    p.hp = Math.min(p.stats.hpMax, p.hp + amount);
+    return p.hp - before;
+  }
+  const cap = Math.min(p.stats.shieldMax, EXTREME.overflowShieldCap);
+  if (cap <= 0) return 0;
+  const before = p.shield;
+  p.shield = Math.min(cap, p.shield + amount * 0.5);
+  return p.shield - before;
+}
+
 export const PLAYER = { radius: 12, hpMax: 100, speed: 300 };
 
 /** 双人模式的合作缩放：敌人更多、血更厚，倒地的队友会自动归队 */

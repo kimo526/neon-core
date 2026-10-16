@@ -1,6 +1,19 @@
 // NEON CORE — 纯逻辑模拟层（支持 1–2 名玩家）。
 // 这一层完全不碰 DOM：可以在浏览器里跑，也可以在 node 里以 60Hz 无头跑几千帧做平衡测试。
-import { ARENA, COOP, ENEMY_SCALING, ENEMY_TYPES, GRAZE, PLAYER_COLORS, TUNING, PLAYER, WEAPONS } from './content.js';
+import {
+  ARENA,
+  COOP,
+  ENEMY_SCALING,
+  ENEMY_TYPES,
+  EXTREME,
+  GRAZE,
+  MODES,
+  PLAYER_COLORS,
+  TUNING,
+  PLAYER,
+  WEAPONS,
+  grantHeal,
+} from './content.js';
 import { CARDS, createStats, rollCards } from './upgrades.js';
 import { PATTERNS, bossPhases, pickPattern } from './patterns.js';
 
@@ -68,12 +81,15 @@ function makePlayer(index, stats, world) {
 }
 
 export function createWorld(seed = 1, opts = {}) {
-  const { playerCount = 1, coopBonus = COOP.enemyBonus } = opts;
+  const { playerCount = 1, coopBonus = COOP.enemyBonus, mode = 'standard' } = opts;
+  const modedef = MODES[mode] ?? MODES.standard;
   const rng = makeRng(seed);
   const world = {
     seed,
     rng,
     time: 0,
+    mode: modedef.id,
+    noHeal: modedef.noHeal,
     arena: { ...ARENA },
     playerCount: clamp(playerCount, 1, 2),
     coopBonus: playerCount > 1 ? coopBonus : 1,
@@ -280,6 +296,7 @@ export function step(world, inputs, dt) {
   for (const p of world.players) {
     if (!p.down) updatePlayer(world, p, list[p.index] ?? list[0], sdt);
   }
+  updateLowHpAlert(world);
   updateEnemies(world, sdt);
   updateBullets(world, sdt);
   updateTrails(world, sdt);
@@ -320,6 +337,19 @@ function updateRespawns(world) {
     p.charges = 1 + Math.max(0, p.stats.dashCharges);
     ev(world, 'playerRevived', { id: p.id, spawn: true });
   }
+}
+
+/** 残血警报：极限模式下血量只会往下走，所以低于 30% 就周期性报警 */
+function updateLowHpAlert(world) {
+  let low = false;
+  for (const p of world.players) {
+    if (p.down) continue;
+    if (p.hp / p.stats.hpMax <= 0.3) low = true;
+  }
+  if (!low) return;
+  if (world.time - (world.lastLowHpAlert ?? -99) < 1.6) return;
+  world.lastLowHpAlert = world.time;
+  ev(world, 'lowHp', { hp: Math.min(...world.players.filter((p) => !p.down).map((p) => p.hp)) });
 }
 
 function updateSpawns(world, dt) {
@@ -506,8 +536,8 @@ function updatePlayer(world, p, input, dt) {
     fire(world, p, st);
   }
 
-  // 回复
-  if (st.regen > 0) p.hp = Math.min(st.hpMax, p.hp + st.regen * dt);
+  // 回复（极限模式走 grantHeal，不会真的回血）
+  if (st.regen > 0) grantHeal(world, p, st.regen * dt);
 
   // 擦弹值：不擦就慢慢冷掉（擦弹闪光也在这里衰减）
   if (p.grazeCharge > 0) p.grazeCharge = Math.max(0, p.grazeCharge - GRAZE.decay * dt);
@@ -723,6 +753,12 @@ function firePattern(world, e, dt, aim) {
   ev(world, 'enemyShoot', { x: e.x, y: e.y });
 }
 
+/**
+ * 唯一允许改玩家血量的入口（实现在 content.js，避免 sim ↔ upgrades 循环依赖）。
+ * 极限模式（noHeal）下任何回复都不生效，只溢出成少量护盾。
+ */
+export { grantHeal } from './content.js';
+
 function damagePlayer(world, p, amount, fromX, fromY) {
   let dmg = amount * p.stats.damageTaken;
   // 反射装甲：先吃护盾，破盾时给一圈反馈
@@ -791,9 +827,9 @@ function killEnemy(world, e, nx, ny, owner = null) {
   });
   ev(world, 'kill', { x: e.x, y: e.y, type: e.type, by: owner?.id ?? 0, kills: world.stats.kills });
   if (owner) {
-    // 击杀回血（残骸回收）
+    // 击杀回血（残骸回收）——极限模式会转成护盾
     const heal = owner.stats.lifeOnKill;
-    if (heal > 0) owner.hp = Math.min(owner.stats.hpMax, owner.hp + heal * 100);
+    if (heal > 0) grantHeal(world, owner, heal * 100);
     // 连锁冲刺：杀完就能再冲
     if (owner.stats.dashOnKill > 0) {
       owner.dashCd = Math.max(0, owner.dashCd - owner.stats.dashOnKill);
@@ -811,14 +847,23 @@ export function triggerProc(world, p, source = null) {
   if (rate <= 0 || p.down) return false;
   if (world.rng() >= rate) return false;
 
-  p.hp = p.stats.hpMax;
-  p.shield = p.stats.shieldMax;
+  // 极限模式：连大奖都不给血（"不能回血"是硬规则），改为满护盾 + 超长无敌
+  // 标准模式：大奖 = 状态全部拉满
   p.heat = 0;
   p.heatLock = false;
   p.charges = 1 + Math.max(0, p.stats.dashCharges);
   p.dashCd = 0;
+  if (!world.noHeal) p.hp = p.stats.hpMax;
   p.iframe = Math.max(p.iframe, 1.6);
   p.jackpots++;
+  // 护盾给满（先抬容量再给盾，否则会被 shieldMax=0 卡住）
+  p.stats.shieldMax = Math.max(p.stats.shieldMax, 24);
+  p.shield = p.stats.shieldMax;
+  if (world.noHeal) {
+    p.stats.shieldMax = Math.max(p.stats.shieldMax, EXTREME.overflowShieldCap);
+    p.shield = EXTREME.overflowShieldCap;
+    p.iframe = Math.max(p.iframe, 3);
+  }
 
   world.jackpot = { life: TUNING.jackpotDuration, x: source?.x ?? p.x, y: source?.y ?? p.y, id: p.id };
   world.screenShake = Math.max(world.screenShake, 16);
@@ -1000,19 +1045,19 @@ function updateParticles(world, dt) {
   if (world.particles.length) world.particles = world.particles.filter((q) => q.life > 0);
 }
 
-/** 某个玩家点了一张卡；不传 playerId 时直接以给定的 stats 玩家身份生效（测试/工具用） */
-export function chooseCard(world, id, playerId = null) {
+/** 某个玩家点了一张卡。传 playerId 时只允许选"发给自己的那三张"（测试/工具可传 allowAny） */
+export function chooseCard(world, id, playerId = null, { allowAny = false } = {}) {
   const p = playerId === null ? world.players[0] : world.players.find((x) => x.id === playerId);
   const card = CARDS.find((c) => c.id === id);
   if (!p || !card) return false;
-  if (playerId !== null) {
+  if (playerId !== null || !allowAny) {
     if (p.down) return false;
-    // 只允许选"发给自己的那三张"
-    if (!world.cardChoices[p.index]?.includes(id)) return false;
-    world.cardChoices[p.index] = [];
+    if (!allowAny && !world.cardChoices[p.index]?.includes(id)) return false;
   }
+  if (!allowAny) world.cardChoices[p.index] = [];
   card.apply(p.stats, world, p);
   p.stats.taken.push(id);
+  // 上限型强化（复合装甲）加上限后就该补满，不算"回血"
   p.hp = Math.min(p.stats.hpMax, p.hp);
   // 二段推进这类"上限型"强化：立刻把充能补满，拿到就能用
   p.charges = Math.max(p.charges, 1 + Math.max(0, p.stats.dashCharges));
