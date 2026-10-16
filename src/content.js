@@ -21,11 +21,12 @@ export const TUNING = {
   shakeHit: 13,
   shakePlayerHit: 20,
 
-  lifeOnKill: 0.02,
+  lifeOnKill: 0.03,
 
   spreadMult: 6,
   waveClearDelay: 1.35,
   cardCount: 3,
+  spawnIframe: 1.2, // 开局/归队的无敌时间
 };
 
 export const WEAPONS = {
@@ -70,9 +71,20 @@ export const ENEMY_TYPES = {
   turret: { hp: 62, radius: 15, speed: 0, accel: 0, damage: 11, color: '#ff5cad', lifeOnHit: 0.02, ranged: true },
 };
 
-export const ENEMY_SCALING = { hp: 1.14, speed: 1.025, damage: 1.055 };
+// 敌人成长：血量按指数（越到后面越肉），伤害按 2.5%/波（慢速复利，避免后期一碰就死）
+export const ENEMY_SCALING = { hp: 1.14, speed: 1.025, damagePerWave: 0.025 };
 
 export const PLAYER = { radius: 12, hpMax: 100, speed: 300 };
+
+/** 双人模式的合作缩放：敌人更多、血更厚，倒地的队友会自动归队 */
+export const COOP = {
+  enemyBonus: 1.7,      // 数量倍率（双人）
+  hpSharing: 0.45,      // 血量加成里有多少来自人数（避免"人多就无脑"）
+  reviveHpRatio: 0.5,   // 清波时队友归队的血量比例
+  respawnDelay: 5,      // 倒地多少秒后自动归队
+};
+
+export const PLAYER_COLORS = ['#4ff0ff', '#ff7ae0'];
 
 export const UPGRADE_TAGS = {
   weapon: { label: '武器核心', color: '#4ff0ff' },

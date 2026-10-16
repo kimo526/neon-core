@@ -1,12 +1,15 @@
 {
   "name": "neon-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "NEON CORE // 解限核心 — 一个热管理驱动的机甲 roguelite 竞技场",
+  "description": "NEON CORE // 解限核心 — 热管理驱动的机甲 roguelite 竞技场（支持本地双人）",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js",
     "sim": "node tools/simulate.mjs",
-    "serve": "node tools/serve.mjs"
+    "sim:coop": "node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2",
+    "serve": "node tools/serve.mjs",
+    "shot": "node tools/headless.mjs solo 12",
+    "shot:coop": "node tools/headless.mjs coop 12"
   }
 }

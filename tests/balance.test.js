@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runHeadless } from '../src/harness.js';
 import { STEP } from '../src/content.js';
@@ -20,8 +20,8 @@ test('多个种子下都不出现数值爆炸或瞬间暴毙', () => {
     const { metrics, world } = runHeadless({ frames: 60 * 120, seed });
     rows.push(`seed=${seed} 存活=${metrics.time.toFixed(0)}s 波次=${metrics.wave} 击杀=${metrics.kills}`);
     assert.ok(metrics.time > 12, `seed=${seed} 12 秒内就死了，可能太难: ${metrics.time.toFixed(1)}s`);
-    assert.ok(Number.isFinite(world.player.hp));
-    assert.ok(world.player.stats.hpMax < 400, '结构上限不应该失去控制');
+    assert.ok(Number.isFinite(world.players[0].hp));
+    assert.ok(world.players[0].stats.hpMax < 400, '结构上限不应该失去控制');
   }
   console.log('  [平衡] ' + rows.join(' | '));
 });
@@ -33,7 +33,7 @@ test('AI 会主动管理热量：热量被顶到高位但不会锁死', () => {
     seed: 9,
     onFrame: (world) => {
       if (world.dead) return;
-      maxHeatRatio = Math.max(maxHeatRatio, world.player.heat / world.player.stats.heatMax);
+      maxHeatRatio = Math.max(maxHeatRatio, world.players[0].heat / world.players[0].stats.heatMax);
     },
   });
   console.log(`  [平衡] 90 秒内热量峰值 ${(maxHeatRatio * 100).toFixed(0)}%，波次 ${metrics.wave}，击杀 ${metrics.kills}`);

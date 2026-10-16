@@ -1,6 +1,6 @@
-// NEON CORE — 纯逻辑模拟层。
+// NEON CORE — 纯逻辑模拟层（支持 1–2 名玩家）。
 // 这一层完全不碰 DOM：可以在浏览器里跑，也可以在 node 里以 60Hz 无头跑几千帧做平衡测试。
-import { ARENA, ENEMY_SCALING, ENEMY_TYPES, TUNING, PLAYER, WEAPONS } from './content.js';
+import { ARENA, COOP, ENEMY_SCALING, ENEMY_TYPES, PLAYER_COLORS, TUNING, PLAYER, WEAPONS } from './content.js';
 import { CARDS, createStats, rollCards } from './upgrades.js';
 
 const TAU = Math.PI * 2;
@@ -18,53 +18,23 @@ export function makeRng(seed = 1) {
   };
 }
 
-export const makeInput = () => ({
+export const makeInput = (x = ARENA.w * 0.5, y = 0) => ({
   moveX: 0,
   moveY: 0,
-  aimX: ARENA.w * 0.5,
-  aimY: 0,
+  aimX: x,
+  aimY: y,
   firing: false,
   dash: false,
 });
 
-export function createWorld(seed = 1) {
-  const rng = makeRng(seed);
-  const stats = createStats();
-  const world = {
-    seed,
-    rng,
-    time: 0,
-    arena: { ...ARENA },
-    player: makePlayer(stats),
-    bullets: [],
-    eBullets: [],
-    enemies: [],
-    particles: [],
-    pulses: [],
-    texts: [],
-    spawnQueue: [],
-    wave: 1,
-    phase: 'play',
-    cardChoices: [],
-    paused: false,
-    timeScale: 1,
-    screenShake: 0,
-    hitStop: 0,
-    muzzle: 0,
-    heatLock: false,
-    dead: false,
-    stats: { kills: 0, shots: 0, hits: 0, waves: 0, timeAlive: 0 },
-    events: [],
-    _id: 0,
-  };
-  spawnWave(world, 1);
-  return world;
-}
-
-function makePlayer(stats) {
-  return {
-    x: ARENA.w * 0.5,
-    y: ARENA.h * 0.5,
+function makePlayer(index, stats, world) {
+  const p = {
+    index,
+    id: index + 1,
+    name: index === 0 ? 'P1' : 'P2',
+    color: PLAYER_COLORS[index % PLAYER_COLORS.length],
+    x: ARENA.w * (index === 0 ? 0.38 : 0.62),
+    y: ARENA.h * (index === 0 ? 0.62 : 0.38),
     vx: 0,
     vy: 0,
     radius: PLAYER.radius,
@@ -77,19 +47,72 @@ function makePlayer(stats) {
     dashT: 0,
     dashCd: 0,
     charges: 1 + Math.max(0, stats.dashCharges),
-    iframe: 0,
+    iframe: TUNING.spawnIframe,
     pulseHits: null,
     trail: [],
+    down: false,
+    heatLock: false,
+    muzzle: 0,
+    statsRun: { kills: 0, shots: 0, hits: 0, timeAlive: 0, damageDealt: 0 },
+    _world: world,
   };
+  return p;
 }
+
+export function createWorld(seed = 1, opts = {}) {
+  const { playerCount = 1, coopBonus = COOP.enemyBonus } = opts;
+  const rng = makeRng(seed);
+  const world = {
+    seed,
+    rng,
+    time: 0,
+    arena: { ...ARENA },
+    playerCount: clamp(playerCount, 1, 2),
+    coopBonus: playerCount > 1 ? coopBonus : 1,
+    timeScale: 1,
+    players: [],
+    bullets: [],
+    eBullets: [],
+    enemies: [],
+    particles: [],
+    pulses: [],
+    spawnQueue: [],
+    wave: 1,
+    phase: 'play',
+    cardChoices: [[], []],
+    screenShake: 0,
+    hitStop: 0,
+    dead: false,
+    waveClearT: 0,
+    stats: { waves: 0, kills: 0 },
+    events: [],
+    _id: 0,
+  };
+  for (let i = 0; i < world.playerCount; i++) {
+    world.players.push(makePlayer(i, createStats(), world));
+  }
+  spawnWave(world, 1);
+  return world;
+}
+
+/** 1 号玩家的便捷引用（单人场景/测试里少写点字） */
+export const p1 = (world) => world.players[0];
+
+/** 还活着（没倒下）的玩家 */
+export const alivePlayers = (world) => world.players.filter((p) => !p.down);
 
 const ev = (world, type, data) => world.events.push({ type, ...data });
 
+export function playerOf(world, bullet) {
+  return world.players.find((p) => p.id === bullet.owner);
+}
+
 /** 按波次生成敌人配比（纯函数，方便测试"第 20 波到底出什么"） */
-export function waveComposition(wave) {
+export function waveComposition(wave, coopBonus = 1) {
   const list = [];
   const add = (type, count) => {
-    for (let i = 0; i < count; i++) list.push(type);
+    const n = Math.max(0, Math.round(count * coopBonus));
+    for (let i = 0; i < n; i++) list.push(type);
   };
   add('drone', 3 + Math.floor(wave * 1.3));
   if (wave >= 2) add('runner', 1 + Math.floor((wave - 1) * 0.7));
@@ -98,20 +121,23 @@ export function waveComposition(wave) {
   return list;
 }
 
-function scaleFor(wave) {
+function scaleFor(wave, coopBonus = 1) {
   const k = wave - 1;
+  const hpMul = 1 + (coopBonus - 1) * COOP.hpSharing;
   return {
-    hp: Math.pow(ENEMY_SCALING.hp, k),
+    hp: Math.pow(ENEMY_SCALING.hp, k) * hpMul,
     speed: Math.pow(ENEMY_SCALING.speed, k),
-    damage: Math.pow(ENEMY_SCALING.damage, k),
+    // 慢速复利：高波次依然危险，但不会变成"一碰就死"
+    damage: Math.pow(1 + ENEMY_SCALING.damagePerWave, k),
   };
 }
 
 export function spawnWave(world, wave) {
-  const comp = waveComposition(wave);
-  const scale = scaleFor(wave);
+  const comp = waveComposition(wave, world.coopBonus);
+  const scale = scaleFor(wave, world.coopBonus);
   const lead = 0.65;
-  world.spawnQueue = comp.map((type, i) => ({ type, at: lead + i * 0.28, scale }));
+  const gap = world.coopBonus > 1 ? 0.22 : 0.28;
+  world.spawnQueue = comp.map((type, i) => ({ type, at: lead + i * gap, scale }));
   ev(world, 'waveStart', { wave });
 }
 
@@ -150,7 +176,7 @@ function spawnEnemy(world, type, scale) {
     knockX: 0,
     knockY: 0,
     phase: world.rng() * TAU,
-    lifeOnHit: def.lifeOnHit ?? 0.02,
+    targetId: 0,
   });
 }
 
@@ -173,11 +199,43 @@ function spawnParticles(world, x, y, n, color, opts = {}) {
   }
 }
 
-/** 主更新：世界每帧只依赖 (world, input, dt)，没有隐藏的全局状态 */
-export function step(world, input, dt) {
+/** 敌人挑目标：谁近打谁（多人时这天然形成"拉仇恨"的合作玩法） */
+function acquireTarget(world, e) {
+  let best = null;
+  let bestD = Infinity;
+  for (const p of world.players) {
+    if (p.down) continue;
+    const d = (p.x - e.x) ** 2 + (p.y - e.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  if (best) {
+    e.targetId = best.id;
+    return best;
+  }
+  return null;
+}
+
+function nearestPlayer(world, e) {
+  let best = null;
+  let bestD = Infinity;
+  for (const p of world.players) {
+    if (p.down) continue;
+    const d = Math.hypot(p.x - e.x, p.y - e.y);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** 主更新：世界每帧只依赖 (world, inputs, dt)，没有隐藏的全局状态 */
+export function step(world, inputs, dt) {
   if (dt <= 0) return world;
   world.events = [];
-  if (world.dead) return world;
 
   // 命中定格：让打击有"顿挫感"
   let scale = 1;
@@ -188,8 +246,13 @@ export function step(world, input, dt) {
   const sdt = dt * scale * world.timeScale;
   world.time += sdt;
 
+  const list = normalizeInputs(world, inputs);
+
   updateSpawns(world, sdt);
-  updatePlayer(world, input, sdt);
+  updateRespawns(world);
+  for (const p of world.players) {
+    if (!p.down) updatePlayer(world, p, list[p.index] ?? list[0], sdt);
+  }
   updateEnemies(world, sdt);
   updateBullets(world, sdt);
   updateEnemyBullets(world, sdt);
@@ -197,9 +260,37 @@ export function step(world, input, dt) {
   updateWave(world, sdt);
 
   world.screenShake = Math.max(0, world.screenShake - dt * 42);
-  world.muzzle = Math.max(0, world.muzzle - dt * 8);
-  if (!world.dead) world.stats.timeAlive += sdt;
+  for (const p of world.players) {
+    p.muzzle = Math.max(0, p.muzzle - dt * 8);
+    if (!p.down) p.statsRun.timeAlive += sdt;
+  }
   return world;
+}
+
+/** 兼容单份 input 和 input 数组两种调用方式 */
+function normalizeInputs(world, inputs) {
+  if (Array.isArray(inputs)) {
+    // 数组下标对应玩家顺序（不是玩家 id），保证索引安全
+    return world.players.map((p, i) => inputs[i] ?? inputs[0] ?? {});
+  }
+  return world.players.map((p, i) => (i === 0 ? inputs : {}));
+}
+
+/** 倒地的玩家会在 COOP.respawnDelay 后满血归队，让双人局能继续打下去 */
+function updateRespawns(world) {
+  if (world.playerCount < 2) return;
+  for (const p of world.players) {
+    if (!p.down) continue;
+    p.respawnT = (p.respawnT ?? COOP.respawnDelay) - 1 / 60;
+    if (p.respawnT > 0) continue;
+    p.down = false;
+    p.hp = p.stats.hpMax;
+    p.iframe = TUNING.reviveIframe;
+    p.heat = 0;
+    p.heatLock = false;
+    p.charges = 1 + Math.max(0, p.stats.dashCharges);
+    ev(world, 'playerRevived', { id: p.id, spawn: true });
+  }
 }
 
 function updateSpawns(world, dt) {
@@ -218,7 +309,7 @@ function updateSpawns(world, dt) {
 function updateWave(world, dt) {
   if (world.phase !== 'play') return;
   if (world.spawnQueue.length || world.enemies.length) return;
-  world.waveClearT = (world.waveClearT ?? 0) + dt;
+  world.waveClearT += dt;
   if (world.waveClearT < TUNING.waveClearDelay) return;
   world.waveClearT = 0;
   world.stats.waves = world.wave;
@@ -227,15 +318,15 @@ function updateWave(world, dt) {
   const next = world.wave + 1;
   if (world.wave % 2 === 1) {
     world.phase = 'upgrade';
-    world.cardChoices = rollCards(world.rng, TUNING.cardCount).map((c) => c.id);
+    // 每个还站着的玩家各抽三张，互不重复
+    world.cardChoices = world.players.map((p) => (p.down ? [] : rollCards(world.rng, TUNING.cardCount).map((c) => c.id)));
     ev(world, 'upgradeOffered', { wave: world.wave });
   }
   world.wave = next;
   spawnWave(world, next);
 }
 
-function updatePlayer(world, input, dt) {
-  const p = world.player;
+function updatePlayer(world, p, input, dt) {
   const st = p.stats;
 
   // 武器切换：换枪会重置热量
@@ -257,10 +348,13 @@ function updatePlayer(world, input, dt) {
       heatCool: w.heatCool,
     });
     p.heat = 0;
-    world.heatLock = false;
+    p.heatLock = false;
   }
 
-  if (input.aimX !== undefined) {
+  // 方向键瞄准：直接给一个 8 向角度
+  if (input.aimAngle !== undefined && input.aimAngle !== null) {
+    p.aim = input.aimAngle;
+  } else if (input.aimX !== undefined) {
     p.aim = Math.atan2(input.aimY - p.y, input.aimX - p.x);
   }
 
@@ -273,16 +367,15 @@ function updatePlayer(world, input, dt) {
     my /= mag;
   }
   const moving = mag > 0.01;
-
   const dashing = p.dashT > 0;
+
   if (dashing) {
     p.dashT -= dt;
     p.trail.push({ x: p.x, y: p.y, life: 0.26 });
     if (p.dashT <= 0) p.pulseHits = null;
   } else {
-    const accel = st.accel;
-    p.vx += mx * accel * dt;
-    p.vy += my * accel * dt;
+    p.vx += mx * st.accel * dt;
+    p.vy += my * st.accel * dt;
     const fr = Math.exp(-TUNING.friction * dt);
     if (!moving) {
       p.vx *= fr;
@@ -312,12 +405,13 @@ function updatePlayer(world, input, dt) {
     p.charges -= 1;
     if (p.charges <= 0) p.dashCd = st.dashCooldown;
     p.pulseHits = st.dashPulse ? new Set() : null;
-    ev(world, 'dash', { x: p.x, y: p.y, dir, charges: p.charges });
+    ev(world, 'dash', { id: p.id, x: p.x, y: p.y, dir, charges: p.charges });
     spawnParticles(world, p.x, p.y, 8, '#8affc1', { speed: 200, life: 0.3, dir: dir + Math.PI, spread: 1.2 });
   }
 
   p.x += p.vx * dt;
   p.y += p.vy * dt;
+
   // 撞墙：反弹衰减一点，别贴脸不动
   const r = p.radius;
   const { w, h } = world.arena;
@@ -340,20 +434,20 @@ function updatePlayer(world, input, dt) {
   for (const t of p.trail) t.life -= dt;
   p.trail = p.trail.filter((t) => t.life > 0);
 
-  // 开火 + 热量：按住扳机就完全不散热，想降温必须松手（这是这个游戏的核心节奏）
+  // 开火 + 热量：按住扳机就完全不散热，想降温必须松手（核心节奏）
   p.fireCd -= dt;
   const heatMul = st.anchor ? (moving ? 0.7 : 2.4) : 1;
-  const cooling = (st.heatCool * (world.heatLock ? TUNING.overheatCoolMul : 1)) * heatMul;
-  const wantFire = !!input.firing && !world.dead;
+  const cooling = (st.heatCool * (p.heatLock ? TUNING.overheatCoolMul : 1)) * heatMul;
+  const wantFire = !!input.firing;
   if (!wantFire && p.heat > 0) {
     p.heat = Math.max(0, p.heat - cooling * dt);
   }
   // 过热锁：降到 release 比例就解锁，避免"罚站 3 秒多"
-  if (world.heatLock && p.heat <= st.heatMax * TUNING.heatRelease) {
-    world.heatLock = false;
-    ev(world, 'cooledDown', { heat: p.heat });
+  if (p.heatLock && p.heat <= st.heatMax * TUNING.heatRelease) {
+    p.heatLock = false;
+    ev(world, 'cooledDown', { id: p.id, heat: p.heat });
   }
-  if (wantFire && !world.heatLock && p.fireCd <= 0 && p.dashT <= 0) {
+  if (wantFire && !p.heatLock && p.fireCd <= 0 && p.dashT <= 0) {
     fire(world, p, st);
   }
 
@@ -365,10 +459,10 @@ function fire(world, p, st) {
   const w = st.weapon;
   p.fireCd = st.fireRate;
   p.heat = Math.min(st.heatMax, p.heat + st.heatPerShot);
-  world.stats.shots += st.pellets;
-  world.muzzle = 1;
+  p.statsRun.shots += st.pellets;
+  p.muzzle = 1;
 
-  const thermo = 1 + (st.thermo * clamp(p.heat / st.heatMax, 0, 1));
+  const thermo = 1 + st.thermo * clamp(p.heat / st.heatMax, 0, 1);
   const dmg = st.damage * thermo;
   const muzzleX = p.x + Math.cos(p.aim) * (p.radius + 4);
   const muzzleY = p.y + Math.sin(p.aim) * (p.radius + 4);
@@ -388,6 +482,7 @@ function fire(world, p, st) {
       ricochet: st.ricochet,
       knock: st.bulletKnockback,
       hit: new Set(),
+      owner: p.id,
       color: w === 'heavy' ? '#ffd166' : '#8ff6ff',
     });
   }
@@ -398,20 +493,19 @@ function fire(world, p, st) {
     dir: p.aim,
     spread: 0.9,
   });
-  ev(world, 'shoot', { x: muzzleX, y: muzzleY, pellets: st.pellets });
+  ev(world, 'shoot', { id: p.id, x: muzzleX, y: muzzleY, pellets: st.pellets, weapon: w });
 
   if (p.heat >= st.heatMax) {
-    world.heatLock = true;
-    ev(world, 'overheat', { x: p.x, y: p.y });
+    p.heatLock = true;
+    ev(world, 'overheat', { id: p.id, x: p.x, y: p.y });
     if (st.ventBlast) {
       spawnParticles(world, p.x, p.y, 26, '#ff5a3c', { speed: 380, life: 0.5, size: 2.4 });
-      world.pulses.push({ x: p.x, y: p.y, r: 8, maxR: 130, life: 0.32, damage: 26, hits: new Set() });
+      world.pulses.push({ owner: p.id, x: p.x, y: p.y, r: 8, maxR: 130, life: 0.32, damage: 26, hits: new Set() });
     }
   }
 }
 
 function updateEnemies(world, dt) {
-  const p = world.player;
   for (const e of world.enemies) {
     e.hurt = Math.max(0, e.hurt - dt * 4);
     if (e.spawnT > 0) {
@@ -426,8 +520,13 @@ function updateEnemies(world, dt) {
     e.knockX *= kd;
     e.knockY *= kd;
 
-    const dx = p.x - e.x;
-    const dy = p.y - e.y;
+    // 目标：优先沿用上一次锁定的玩家（攻击有连贯性），目标倒了再重新挑最近的
+    let target = world.players.find((p) => p.id === e.targetId && !p.down) ?? acquireTarget(world, e);
+    if (!target) continue;
+    e.targetId = target.id;
+
+    const dx = target.x - e.x;
+    const dy = target.y - e.y;
     const dist = Math.hypot(dx, dy) || 1;
     const nx = dx / dist;
     const ny = dy / dist;
@@ -448,7 +547,7 @@ function updateEnemies(world, dt) {
       e.y += e.vy * dt;
     }
 
-    // 分离：同类型互相推开，避免完全重叠（也让玩家的穿透弹更值钱）
+    // 分离：互相推开，避免完全重叠（也让穿透弹更值钱）
     for (const o of world.enemies) {
       if (o === e || o.spawnT > 0) continue;
       const ddx = e.x - o.x;
@@ -472,8 +571,7 @@ function updateEnemies(world, dt) {
       e.y += ny * toward * 40 * dt;
       if (e.fireCd <= 0 && dist < 520) {
         e.fireCd = 1.5 + world.rng() * 0.7;
-        const spread = 0.05;
-        const a = Math.atan2(dy, dx) + (world.rng() - 0.5) * spread;
+        const a = Math.atan2(dy, dx) + (world.rng() - 0.5) * 0.05;
         world.eBullets.push({
           x: e.x + Math.cos(a) * (e.radius + 3),
           y: e.y + Math.sin(a) * (e.radius + 3),
@@ -489,27 +587,30 @@ function updateEnemies(world, dt) {
     }
 
     // 接触伤害
-    if (dist < e.radius + p.radius) {
-      if (p.iframe <= 0) {
-        damagePlayer(world, e.damage, e.x, e.y);
-        e.knockX -= nx * 260;
-        e.knockY -= ny * 260;
-      }
+    if (dist < e.radius + target.radius && target.iframe <= 0) {
+      damagePlayer(world, target, e.damage, e.x, e.y);
+      e.knockX -= nx * 260;
+      e.knockY -= ny * 260;
     }
 
-    // 冲刺脉冲
-    if (p.dashT > 0 && p.pulseHits && !p.pulseHits.has(e.id) && dist < e.radius + p.radius + 4) {
-      p.pulseHits.add(e.id);
-      hurtEnemy(world, e, 26, nx, ny, 320, true);
-      spawnParticles(world, e.x, e.y, 10, '#8affc1', { speed: 260, life: 0.3 });
+    // 冲刺脉冲（每个玩家独立判定）
+    for (const dp of world.players) {
+      if (dp.down || dp.dashT <= 0 || !dp.pulseHits || dp.pulseHits.has(e.id)) continue;
+      const d = Math.hypot(e.x - dp.x, e.y - dp.y);
+      if (d < e.radius + dp.radius + 4) {
+        dp.pulseHits.add(e.id);
+        const px = (e.x - dp.x) / (d || 1);
+        const py = (e.y - dp.y) / (d || 1);
+        hurtEnemy(world, e, 26, px, py, 320, dp, true);
+        spawnParticles(world, e.x, e.y, 10, '#8affc1', { speed: 260, life: 0.3 });
+      }
     }
   }
 
   world.enemies = world.enemies.filter((e) => e.hp > 0);
 }
 
-function damagePlayer(world, amount, fromX, fromY) {
-  const p = world.player;
+function damagePlayer(world, p, amount, fromX, fromY) {
   const dmg = amount * p.stats.damageTaken;
   p.hp -= dmg;
   p.iframe = TUNING.reviveIframe * 0.55;
@@ -517,33 +618,42 @@ function damagePlayer(world, amount, fromX, fromY) {
   p.vx += (p.x - fromX) * 6;
   p.vy += (p.y - fromY) * 6;
   spawnParticles(world, p.x, p.y, 14, '#ff5a3c', { speed: 240, life: 0.4 });
-  ev(world, 'playerHit', { hp: p.hp, damage: dmg });
+  ev(world, 'playerHit', { id: p.id, hp: p.hp, damage: dmg });
   if (p.hp <= 0) {
     p.hp = 0;
-    world.dead = true;
+    p.down = true;
+    p.dashT = 0;
+    p.respawnT = COOP.respawnDelay;
     world.screenShake = 30;
     spawnParticles(world, p.x, p.y, 60, '#ff5a3c', { speed: 460, life: 0.9, size: 3 });
-    ev(world, 'playerDead', { wave: world.wave, kills: world.stats.kills });
+    ev(world, 'playerDown', { id: p.id, wave: world.wave });
+    // 团灭才结束：多人时另一个还能撑，倒下的会在几秒后归队
+    if (!alivePlayers(world).length) {
+      world.dead = true;
+      ev(world, 'allDown', { wave: world.wave, kills: world.stats.kills });
+    }
   }
 }
 
-function hurtEnemy(world, e, damage, nx, ny, knock, isPulse = false) {
+function hurtEnemy(world, e, damage, nx, ny, knock, owner = null, isPulse = false) {
+  const before = e.hp;
   e.hp -= damage;
+  const actual = Math.max(0, Math.min(damage, before)); // 过量伤害不计入统计
   e.hurt = 1;
+  if (owner) owner.statsRun.damageDealt += actual;
   if (!isPulse) {
     e.knockX += nx * knock;
     e.knockY += ny * knock;
     world.hitStop = Math.max(world.hitStop, TUNING.hitStop);
   }
   spawnParticles(world, e.x, e.y, 5, e.color, { speed: 220, life: 0.26, dir: Math.atan2(-ny, -nx), spread: 1.8 });
-  ev(world, 'hit', { x: e.x, y: e.y, damage });
-  if (e.hp <= 0) {
-    killEnemy(world, e, nx, ny);
-  }
+  ev(world, 'hit', { x: e.x, y: e.y, damage, owner: owner?.id ?? 0 });
+  if (e.hp <= 0) killEnemy(world, e, nx, ny, owner);
 }
 
-function killEnemy(world, e, nx, ny) {
+function killEnemy(world, e, nx, ny, owner = null) {
   world.stats.kills++;
+  if (owner) owner.statsRun.kills++;
   world.screenShake = Math.max(world.screenShake, e.type === 'tank' ? 8 : TUNING.shakeKill);
   spawnParticles(world, e.x, e.y, e.type === 'tank' ? 34 : 16, e.color, {
     speed: e.type === 'tank' ? 380 : 260,
@@ -552,9 +662,12 @@ function killEnemy(world, e, nx, ny) {
     dir: Math.atan2(ny, nx),
     spread: 2.4,
   });
-  const heal = world.player.stats.lifeOnKill;
-  if (heal > 0) world.player.hp = Math.min(world.player.stats.hpMax, world.player.hp + heal * 100);
-  ev(world, 'kill', { x: e.x, y: e.y, type: e.type, kills: world.stats.kills });
+  ev(world, 'kill', { x: e.x, y: e.y, type: e.type, by: owner?.id ?? 0, kills: world.stats.kills });
+  // 击杀回血（残骸回收）：只回给真正打死它的人
+  if (owner) {
+    const heal = owner.stats.lifeOnKill;
+    if (heal > 0) owner.hp = Math.min(owner.stats.hpMax, owner.hp + heal * 100);
+  }
 }
 
 function updateBullets(world, dt) {
@@ -597,8 +710,9 @@ function updateBullets(world, dt) {
       if (dx * dx + dy * dy <= rr * rr) {
         b.hit.add(e.id);
         const sp = Math.hypot(b.vx, b.vy) || 1;
-        world.stats.hits++;
-        hurtEnemy(world, e, b.damage, b.vx / sp, b.vy / sp, b.knock);
+        const owner = playerOf(world, b);
+        if (owner) owner.statsRun.hits++;
+        hurtEnemy(world, e, b.damage, b.vx / sp, b.vy / sp, b.knock, owner);
         if (b.pierce > 0) b.pierce--;
         else b.life = 0;
         break;
@@ -607,11 +721,12 @@ function updateBullets(world, dt) {
   }
   world.bullets = world.bullets.filter((b) => b.life > 0);
 
-  // 脉冲（强制排热）
+  // 强制排热脉冲
   if (world.pulses.length) {
     for (const pulse of world.pulses) {
       pulse.life -= dt;
       pulse.r = pulse.maxR * (1 - Math.max(0, pulse.life) / 0.32);
+      const owner = world.players.find((p) => p.id === pulse.owner) ?? null;
       for (const e of world.enemies) {
         if (e.hp <= 0 || pulse.hits.has(e.id)) continue;
         const d = Math.hypot(e.x - pulse.x, e.y - pulse.y);
@@ -619,7 +734,7 @@ function updateBullets(world, dt) {
           pulse.hits.add(e.id);
           const nx = (e.x - pulse.x) / (d || 1);
           const ny = (e.y - pulse.y) / (d || 1);
-          hurtEnemy(world, e, pulse.damage, nx, ny, 420, true);
+          hurtEnemy(world, e, pulse.damage, nx, ny, 420, owner, true);
         }
       }
     }
@@ -628,19 +743,22 @@ function updateBullets(world, dt) {
 }
 
 function updateEnemyBullets(world, dt) {
-  const p = world.player;
   const { w, h } = world.arena;
   for (const b of world.eBullets) {
     b.life -= dt;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     if (b.x < -20 || b.x > w + 20 || b.y < -20 || b.y > h + 20) b.life = 0;
-    const dx = p.x - b.x;
-    const dy = p.y - b.y;
-    const rr = p.radius + b.r;
-    if (dx * dx + dy * dy <= rr * rr && p.iframe <= 0) {
-      b.life = 0;
-      damagePlayer(world, b.damage, b.x, b.y);
+    for (const p of world.players) {
+      if (p.down || p.iframe > 0) continue;
+      const dx = p.x - b.x;
+      const dy = p.y - b.y;
+      const rr = p.radius + b.r;
+      if (dx * dx + dy * dy <= rr * rr) {
+        b.life = 0;
+        damagePlayer(world, p, b.damage, b.x, b.y);
+        break;
+      }
     }
   }
   world.eBullets = world.eBullets.filter((b) => b.life > 0);
@@ -658,23 +776,66 @@ function updateParticles(world, dt) {
   if (world.particles.length) world.particles = world.particles.filter((q) => q.life > 0);
 }
 
-/** 玩家点了一张卡 */
-export function chooseCard(world, id) {
+/** 某个玩家点了一张卡；不传 playerId 时直接以给定的 stats 玩家身份生效（测试/工具用） */
+export function chooseCard(world, id, playerId = null) {
+  const p = playerId === null ? world.players[0] : world.players.find((x) => x.id === playerId);
   const card = CARDS.find((c) => c.id === id);
-  if (!card) return false;
-  card.apply(world.player.stats, world);
-  world.player.stats.taken.push(id);
-  world.player.hp = Math.min(world.player.stats.hpMax, world.player.hp);
+  if (!p || !card) return false;
+  if (playerId !== null) {
+    if (p.down) return false;
+    // 只允许选"发给自己的那三张"
+    if (!world.cardChoices[p.index]?.includes(id)) return false;
+    world.cardChoices[p.index] = [];
+  }
+  card.apply(p.stats, world, p);
+  p.stats.taken.push(id);
+  p.hp = Math.min(p.stats.hpMax, p.hp);
   // 二段推进这类"上限型"强化：立刻把充能补满，拿到就能用
-  const maxCharges = 1 + Math.max(0, world.player.stats.dashCharges);
-  world.player.charges = Math.max(world.player.charges, maxCharges);
-  world.phase = 'play';
-  world.cardChoices = [];
-  ev(world, 'cardPicked', { id });
+  p.charges = Math.max(p.charges, 1 + Math.max(0, p.stats.dashCharges));
+
+  ev(world, 'cardPicked', { id, player: p.id });
+  // 所有人都选完（或都倒了）才回到战斗
+  if (world.cardChoices.every((list) => list.length === 0)) world.phase = 'play';
   return true;
 }
 
+/** 跳过还没选的人（用于单人遗留/超时/玩家倒地） */
+export function skipRemainingCards(world) {
+  world.cardChoices = world.cardChoices.map(() => []);
+  world.phase = 'play';
+}
+
+/** 波次清空时：让倒地的玩家提前归队（双人模式的"救援"机制） */
+export function reviveDowned(world, hpRatio = COOP.reviveHpRatio) {
+  const revived = [];
+  for (const p of world.players) {
+    if (!p.down) continue;
+    p.down = false;
+    p.respawnT = 0;
+    p.hp = Math.max(1, p.stats.hpMax * hpRatio);
+    p.iframe = TUNING.reviveIframe;
+    p.heat = 0;
+    p.heatLock = false;
+    p.charges = 1 + Math.max(0, p.stats.dashCharges);
+    revived.push(p.id);
+    ev(world, 'playerRevived', { id: p.id, spawn: false });
+  }
+  return revived;
+}
+
 export function accuracy(world) {
-  if (!world.stats.shots) return 0;
-  return world.stats.hits / world.stats.shots;
+  let shots = 0;
+  let hits = 0;
+  for (const p of world.players) {
+    shots += p.statsRun.shots;
+    hits += p.statsRun.hits;
+  }
+  if (!shots) return 0;
+  // 穿透/弹射会让同一发子弹命中多次，统计上封顶 100%
+  return Math.min(1, hits / shots);
+}
+
+export function playerAccuracy(p) {
+  if (!p.statsRun.shots) return 0;
+  return Math.min(1, p.statsRun.hits / p.statsRun.shots);
 }

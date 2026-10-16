@@ -45,13 +45,22 @@ canvas#game {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 2%;
   padding: 14px 18px;
   font-size: clamp(9px, 1.5vh, 15px);
   letter-spacing: 0.08em;
 }
 
-.hud-left { width: 32%; }
-.hud-right { text-align: right; }
+.hud-player {
+  width: 26%;
+  min-width: 96px;
+}
+
+/* 双人镜像：数值永远贴外侧，单位标签贴内侧，两条血条都朝屏幕中间生长 */
+.hud-player + .hud-player .row { flex-direction: row-reverse; }
+.hud-player + .hud-player .bar > i { transform-origin: right center; }
+
+#hud.coop .hud-player { width: 42%; }
 
 .row {
   display: flex;
@@ -60,11 +69,11 @@ canvas#game {
   margin-bottom: 2px;
 }
 
-.hud-right .row { justify-content: flex-end; gap: 10px; }
-
 .label { color: var(--dim); font-size: 0.82em; }
 
 .value { color: var(--neon); font-weight: 700; }
+.hud-player { --pc: var(--neon); }
+.hud-player .value { color: var(--pc); }
 .value.warn { color: var(--hot); }
 
 .bar {
@@ -83,8 +92,8 @@ canvas#game {
   transition: transform 90ms linear;
 }
 
-.bar > i.hp { background: linear-gradient(90deg, #2fd6a0, #7ef7c8); }
-.bar > i.heat { background: linear-gradient(90deg, #4ff0ff, #ff5a3c); }
+.bar > i.hpbar { background: linear-gradient(90deg, #2fd6a0, #7ef7c8); }
+.bar > i.heatbar { background: linear-gradient(90deg, #4ff0ff, #ff5a3c); }
 
 #overlay {
   position: absolute;
@@ -145,8 +154,35 @@ canvas#game {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: center;
+  align-items: stretch;
   margin: 16px 0 8px;
 }
+
+.panel .cards.two-up { gap: 18px; }
+
+.card-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.card-col .col-title {
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  font-size: 0.95em;
+  margin-bottom: 2px;
+}
+
+.card-col.done {
+  justify-content: center;
+  opacity: 0.55;
+  border: 1px dashed #24455f;
+  padding: 14px 18px;
+}
+
+.panel .keys.score { text-align: left; gap: 10px; }
+.panel .keys.score .dim { color: #7c93a8; font-size: 0.9em; }
 
 .card {
   width: clamp(140px, 22vw, 200px);

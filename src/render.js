@@ -3,6 +3,22 @@ import { ARENA } from './content.js';
 
 const TAU = Math.PI * 2;
 
+const withAlpha = (hex, a) => {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Math.max(0, Math.min(1, a))})`;
+};
+const mixHex = (a, b, k) => {
+  const parse = (hex) => {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const [r1, g1, b1] = parse(a);
+  const [r2, g2, b2] = parse(b);
+  return `rgb(${Math.round(r1 + (r2 - r1) * k)}, ${Math.round(g1 + (g2 - g1) * k)}, ${Math.round(b1 + (b2 - b1) * k)})`;
+};
+
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
   const { w, h } = ARENA;
@@ -85,12 +101,14 @@ export function createRenderer(canvas) {
     ctx.strokeRect(1, 1, w - 2, h - 2);
 
     // 冲刺残影
-    for (const tr of p.trail) {
-      const a = Math.max(0, tr.life / 0.26) * 0.5;
-      ctx.fillStyle = `rgba(138, 255, 193, ${a})`;
-      ctx.beginPath();
-      ctx.arc(tr.x, tr.y, p.radius * (0.5 + a), 0, TAU);
-      ctx.fill();
+    for (const p of world.players) {
+      for (const tr of p.trail) {
+        const a = Math.max(0, tr.life / 0.26) * 0.5;
+        ctx.fillStyle = withAlpha(p.color, a);
+        ctx.beginPath();
+        ctx.arc(tr.x, tr.y, p.radius * (0.5 + a), 0, TAU);
+        ctx.fill();
+      }
     }
 
     // 脉冲环
@@ -147,8 +165,8 @@ export function createRenderer(canvas) {
     }
     ctx.globalAlpha = 1;
 
-    // 玩家
-    if (!world.dead) {
+    // 玩家（支持双人）
+    for (const p of world.players) {
       drawPlayer(ctx, world, p, t);
     }
 
@@ -157,7 +175,7 @@ export function createRenderer(canvas) {
     ctx.restore();
 
     // 屏幕特效：受击闪光 + 热量红晕（不参与震动）
-    const heat = p.heat / p.stats.heatMax;
+    const heat = Math.max(...world.players.filter((x) => !x.down).map((x) => x.heat / x.stats.heatMax), 0);
     if (heat > 0.55 && !world.dead) {
       const k = (heat - 0.55) / 0.45;
       ctx.globalAlpha = k;
@@ -175,6 +193,16 @@ export function createRenderer(canvas) {
       ctx.globalAlpha = 1;
       flash.a *= 0.88;
     }
+
+    // 多人时在每位玩家头顶标一个 P1 / P2，避免颜色看混
+    if (world.players.length > 1) {
+      ctx.font = 'bold 10px "Cascadia Mono", Consolas, monospace';
+      ctx.textAlign = 'center';
+      for (const p of world.players) {
+        ctx.fillStyle = withAlpha(p.color, p.down ? 0.35 : 0.9);
+        ctx.fillText(p.name, p.x, p.y - p.radius - 8);
+      }
+    }
   }
 
   function hurt(amount) {
@@ -187,12 +215,42 @@ export function createRenderer(canvas) {
 
 function drawPlayer(ctx, world, p, t) {
   const r = p.radius;
+  const heatRatio = Math.min(1, p.heat / p.stats.heatMax);
+  // 机体颜色随热量偏红：热量机制的主要视觉反馈
+  const base = p.down ? '#5a6b78' : mixHex(p.color, '#ff5a3c', Math.max(0, heatRatio - 0.55) / 0.45);
+
+  if (p.down) {
+    // 倒下的机体：残骸 + 归队倒计时环
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.strokeStyle = 'rgba(120, 140, 155, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + t;
+      const x = Math.cos(a) * r * 0.9;
+      const y = Math.sin(a) * r * 0.9;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    const total = 5;
+    const left = Math.max(0, p.respawnT ?? 0);
+    ctx.strokeStyle = withAlpha(p.color, 0.8);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 8, -Math.PI / 2, -Math.PI / 2 + (1 - left / total) * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
   ctx.save();
   ctx.translate(p.x, p.y);
 
   // 瞄准线
-  const lockAlpha = world.heatLock ? 0.06 : 0.22;
-  ctx.strokeStyle = `rgba(79, 240, 255, ${lockAlpha})`;
+  const lockAlpha = p.heatLock ? 0.06 : 0.22;
+  ctx.strokeStyle = withAlpha(p.color, lockAlpha);
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, 0);
@@ -210,11 +268,10 @@ function drawPlayer(ctx, world, p, t) {
 
   ctx.rotate(p.aim);
   // 机体：箭头
-  const color = world.heatLock ? '#ff7a5a' : '#4ff0ff';
-  ctx.shadowColor = color;
+  ctx.shadowColor = base;
   ctx.shadowBlur = 16;
   ctx.fillStyle = '#0b1c26';
-  ctx.strokeStyle = color;
+  ctx.strokeStyle = base;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(r * 1.5, 0);
@@ -226,10 +283,10 @@ function drawPlayer(ctx, world, p, t) {
   ctx.stroke();
 
   // 枪口火花
-  if (world.muzzle > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${world.muzzle})`;
+  if (p.muzzle > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${p.muzzle})`;
     ctx.beginPath();
-    ctx.arc(r * 1.6, 0, 3 + world.muzzle * 3, 0, TAU);
+    ctx.arc(r * 1.6, 0, 3 + p.muzzle * 3, 0, TAU);
     ctx.fill();
   }
   ctx.shadowBlur = 0;

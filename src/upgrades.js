@@ -114,10 +114,10 @@ export const CARDS = [
     id: 'killheal',
     tag: 'chassis',
     name: '残骸回收',
-    desc: () => '击杀恢复 2 点结构值',
+    desc: (s) => `击杀恢复 ${((s.lifeOnKill + 0.03) * 100).toFixed(0)} 点结构值`,
     weight: 0.9,
     apply: (s) => {
-      s.lifeOnKill += 0.02;
+      s.lifeOnKill += 0.03;
     },
   },
   {
@@ -126,9 +126,9 @@ export const CARDS = [
     name: '复合装甲',
     desc: () => '结构上限 +25，并立即修复 25',
     weight: 1,
-    apply: (s, world) => {
+    apply: (s, world, player) => {
       s.hpMax += 25;
-      if (world) world.player.hp = Math.min(s.hpMax, world.player.hp + 25);
+      if (player) player.hp = Math.min(s.hpMax, player.hp + 25);
     },
   },
   {
@@ -227,12 +227,13 @@ export function createStats() {
   };
 }
 
-export function applyCard(world, id) {
+export function applyCard(world, id, playerId = null) {
   const card = CARDS.find((c) => c.id === id);
-  if (!card) return null;
-  card.apply(world.player.stats, world);
-  world.player.stats.taken.push(id);
-  if (card.id === 'armor') world.player.hp = Math.min(world.player.stats.hpMax, world.player.hp);
+  const player = (playerId === null ? world.players?.[0] : world.players?.find((p) => p.id === playerId)) ?? null;
+  if (!card || !player) return null;
+  card.apply(player.stats, world, player);
+  player.stats.taken.push(id);
+  player.hp = Math.min(player.stats.hpMax, player.hp);
   return card;
 }
 
