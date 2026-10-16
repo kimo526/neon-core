@@ -2,7 +2,7 @@
 // 策略：stale-while-revalidate —— 先给缓存（秒开），同时后台拉新版更新缓存。
 //
 // ★ 改了 src/ 下任何文件，必须把 CACHE 的版本号 +1，否则老玩家会一直拿到旧代码。
-const CACHE = 'neon-core-v6';
+const CACHE = 'neon-core-v7';
 const ASSETS = [
   './',
   './index.html',

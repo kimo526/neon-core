@@ -137,7 +137,6 @@ async function main() {
   // 1) 抓未捕获的错误
   const errs = JSON.parse(await evalJs('JSON.stringify(window.__errs || [])'));
   problems.push(...errs.map((e) => `未捕获错误: ${e}`));
-
   // 2) 主循环是否在推进
   const f1 = await evalJs('window.NEON.frameNo');
   await sleep(1200);
@@ -163,6 +162,12 @@ async function main() {
   console.log(`[check] 帧数推进: ${f1} → ${f2} → ${after.frameCount}`);
   console.log(`[check] 开局状态: wave=${after.wave} 玩家=${after.players.length} 敌人=${after.enemies}`);
   console.log(`[check] 侧栏区块: ${/音频/.test(hintsText) ? '含音频' : '缺音频'} / ${/操作提示/.test(hintsText) ? '含操作提示' : '缺操作提示'}`);
+
+  // 5) ★ 触摸设备模式：桌面浏览器不满足 pointer:coarse，触屏那段代码根本不会执行，
+  //    所以必须单独模拟一台手机，否则输入层里的错误会整片漏过去。
+  const touchProblems = await checkTouch(send, evalJs, problems);
+  if (touchProblems.length) problems.push(...touchProblems);
+
   if (problems.length) {
     console.log(`\n[check] ❌ 发现 ${problems.length} 个问题：`);
     for (const p of [...new Set(problems)].slice(0, 8)) console.log('   - ' + p);
@@ -171,11 +176,119 @@ async function main() {
     cleanup();
     process.exit(1);
   }
-  console.log('\n[check] ✅ 模块加载与主循环正常');
+  console.log('\n[check] ✅ 模块加载、主循环与触屏输入正常');
   clearTimeout(bail);
   ws.close();
   cleanup();
   process.exit(0);
+}
+
+/** 模拟一台手机：开启触摸模拟后重载，再真的派发 touch 事件，看角色会不会动 */
+async function checkTouch(send, evalJs, problems) {
+  const out = [];
+  const rect = JSON.parse(
+    await evalJs(
+      'JSON.stringify((()=>{const c=document.getElementById("game").getBoundingClientRect();return {x:c.left,y:c.top,w:c.width,h:c.height}})())'
+    )
+  );
+  if (!rect.w) {
+    out.push('拿不到画布尺寸，跳过触摸检查');
+    return out;
+  }
+
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 780,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  await send('Page.reload', { ignoreCache: false });
+  await sleep(3500);
+
+  // 装上错误收集器并开一局
+  await evalJs(`
+    window.__errs = [];
+    window.addEventListener('error', (e) => window.__errs.push(String(e.message)));
+    true
+  `);
+  const isTouch = await evalJs('window.NEON ? window.NEON.isTouch : null');
+  await evalJs('window.NEON && window.NEON.start(1, "standard")');
+  await sleep(1800);
+
+  const box = JSON.parse(
+    await evalJs(
+      'JSON.stringify((()=>{const c=document.getElementById("game").getBoundingClientRect();return {x:c.left,y:c.top,w:c.width,h:c.height}})())'
+    )
+  );
+  if (!box.w) {
+    out.push('手机布局下拿不到画布尺寸');
+    return out;
+  }
+
+  const p0 = JSON.parse(await evalJs('JSON.stringify({x:window.NEON.world.players[0].x,y:window.NEON.world.players[0].y})'));
+
+  // 左半屏按下并向右上拖 → 应该产生移动
+  const lx = box.x + box.w * 0.18;
+  const ly = box.y + box.h * 0.7;
+  const mkTouch = (id, x, y) => ({ x, y, id, radiusX: 12, radiusY: 12, force: 1 });
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [mkTouch(1, lx, ly)] });
+  for (let i = 1; i <= 8; i++) {
+    await send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [mkTouch(1, lx + i * 6, ly - i * 6)],
+    });
+    await sleep(60);
+  }
+  // ★ 摇杆状态要在手指还按着的时候读（松手后会被清零）
+  const stick = JSON.parse(
+    await evalJs('JSON.stringify(window.NEON.touchState ? {move: window.NEON.touchState.move, active: window.NEON.touchState.active} : null)')
+  );
+  await sleep(700);
+  const p1 = JSON.parse(await evalJs('JSON.stringify({x:window.NEON.world.players[0].x,y:window.NEON.world.players[0].y})'));
+
+  // 松手（结束时传"剩余触点"，全松就是空数组）
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(300);
+  const released = JSON.parse(
+    await evalJs('JSON.stringify(window.NEON.touchState ? {move: window.NEON.touchState.move} : null)')
+  );
+
+  // 右半屏点一下 → 应该触发冲刺（dashT 活得不久，所以在窗口内多次采样）
+  const rx = box.x + box.w * 0.8;
+  const ry = box.y + box.h * 0.5;
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [mkTouch(2, rx, ry)] });
+  let dashing = false;
+  let fired = false;
+  for (let i = 0; i < 12; i++) {
+    const st = JSON.parse(await evalJs('JSON.stringify({dash: window.NEON.world.players[0].dashT, heat: window.NEON.world.players[0].heat})'));
+    if (st.dash > 0) dashing = true;
+    if (st.heat > 0) fired = true;
+    await sleep(60);
+  }
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await sleep(300);
+
+  const errs = JSON.parse(await evalJs('JSON.stringify(window.__errs || [])'));
+  const moved = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+  const stickLen = stick ? Math.hypot(stick.move.x, stick.move.y) : 0;
+  const releasedLen = released ? Math.hypot(released.move.x, released.move.y) : 0;
+
+  console.log(
+    `[check] 触摸模式: isTouch=${isTouch} 摇杆输入=${stickLen.toFixed(2)} 移动距离=${moved.toFixed(1)}px 松手归零=${releasedLen === 0 ? '是' : '否'} 冲刺=${dashing ? '触发' : '未触发'} 开火=${fired ? '有' : '无'}`
+  );
+  if (isTouch !== true) out.push('触摸模拟下 isTouch 仍为 false（设备判定有问题）');
+  if (stickLen < 0.3) out.push(`摇杆没有产生输入（move 长度 ${stickLen.toFixed(2)}）`);
+  if (moved < 8) out.push(`按下并拖动后角色几乎没动（${moved.toFixed(1)}px）`);
+  if (releasedLen !== 0) out.push('松手后摇杆没有归零（机甲会一直飘）');
+  if (!dashing) out.push('右半屏点击没有触发冲刺');
+  if (!fired) out.push('有敌人时没有自动开火');
+  for (const e of errs) out.push(`触摸模式报错: ${e}`);
+
+  // 恢复桌面状态，别影响后续
+  await send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await send('Emulation.clearDeviceMetricsOverride');
+  return out;
 }
 
 main().catch((err) => {

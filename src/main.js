@@ -516,6 +516,13 @@ window.NEON = {
   start: startRun,
   pick: pickCard,
   audio,
+  /** 触屏设备判定与摇杆状态（自动化验收要用真触摸事件跑这条路径） */
+  get isTouch() {
+    return input.isTouch;
+  },
+  get touchState() {
+    return input.touchState;
+  },
   music: {
     get enabled() {
       return music.enabled;

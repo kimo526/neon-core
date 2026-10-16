@@ -94,10 +94,24 @@ export function createInput(canvas) {
     y: (held(m.down) ? 1 : 0) - (held(m.up) ? 1 : 0),
   });
 
-  // ---------- 触屏：左侧虚拟摇杆移动，右侧自动瞄准最近的敌人 ----------
+  // ---------- 触屏：左侧虚拟摇杆移动，右侧点击冲刺 / 按住开火 ----------
   // 手机上没法做鼠标瞄准，所以干脆做成"自动索敌"：你只负责走位和冲刺，
   // 这也正好和"擦弹/走位"的核心玩法对得上。
-  const touch = { id: null, ox: 0, oy: 0, x: 0, y: 0, move: { x: 0, y: 0 }, firing: false, dashQueued: false, dashAt: -99 };
+  const JOY_DEAD = 6; // 死区（逻辑像素）：手指轻微抖动不该让机甲乱走
+  const JOY_MAX = 54; // 推到这个距离就是满速
+  const touch = {
+    id: null,
+    ox: 0,
+    oy: 0,
+    x: 0,
+    y: 0,
+    move: { x: 0, y: 0 },
+    active: false,
+    firing: false,
+    fireIds: new Set(),
+    dashQueued: false,
+    dashAt: -99,
+  };
   const isTouchDevice = () => (navigator.maxTouchPoints ?? 0) > 0 || window.matchMedia('(pointer: coarse)').matches;
 
   function toGame(clientX, clientY) {
@@ -108,12 +122,13 @@ export function createInput(canvas) {
     };
   }
 
-  function nearestEnemyTo(pos) {
+  /** 最近的敌人（带提前量用）。注意：参数是敌人列表，别写成外面那个 world */
+  function nearestEnemyTo(enemies, from) {
     let best = null;
     let bestD = Infinity;
-    for (const e of world) {
+    for (const e of enemies) {
       if (e.spawnT > 0) continue;
-      const d = Math.hypot(e.x - pos.x, e.y - pos.y);
+      const d = Math.hypot(e.x - from.x, e.y - from.y);
       if (d < bestD) {
         bestD = d;
         best = e;
@@ -122,22 +137,50 @@ export function createInput(canvas) {
     return best;
   }
 
+  /** 手指位置 → 摇杆向量（带回中死区 + 摇杆跟手） */
+  function applyStick() {
+    const dx = touch.x - touch.ox;
+    const dy = touch.y - touch.oy;
+    const d = Math.hypot(dx, dy);
+    if (d < JOY_DEAD) {
+      touch.move.x = 0;
+      touch.move.y = 0;
+      return;
+    }
+    // 摇杆跟手：手指拉太远就把原点往前拖，避免"推到头了还是慢慢走"的憋屈感
+    if (d > JOY_MAX) {
+      const pull = d - JOY_MAX;
+      touch.ox += (dx / d) * pull;
+      touch.oy += (dy / d) * pull;
+    }
+    const k = Math.min(1, (d - JOY_DEAD) / (JOY_MAX - JOY_DEAD));
+    touch.move.x = (dx / d) * k;
+    touch.move.y = (dy / d) * k;
+  }
+
   canvas.addEventListener(
     'touchstart',
     (e) => {
       if (!isTouchDevice()) return;
+      const rect = canvas.getBoundingClientRect();
       for (const t of e.changedTouches) {
         const g = toGame(t.clientX, t.clientY);
-        if (t.clientX - canvas.getBoundingClientRect().left < canvas.getBoundingClientRect().width * 0.45) {
+        const leftHalf = t.clientX - rect.left < rect.width * 0.45;
+        if (leftHalf) {
+          // 左半屏：占住摇杆（已经有一根手指在控制就忽略新的）
           if (touch.id === null) {
             touch.id = t.identifier;
+            touch.active = true;
             touch.ox = g.x;
             touch.oy = g.y;
             touch.x = g.x;
             touch.y = g.y;
+            touch.move.x = 0;
+            touch.move.y = 0;
           }
         } else {
-          // 右半边：点一下 = 冲刺（短促），按住 = 持续开火（子弹仍然自动索敌）
+          // 右半屏：点一下 = 冲刺，按住 = 持续开火（子弹自动索敌）
+          touch.fireIds.add(t.identifier);
           touch.firing = true;
           const now = performance.now();
           if (now - touch.dashAt > 260) {
@@ -154,17 +197,13 @@ export function createInput(canvas) {
   canvas.addEventListener(
     'touchmove',
     (e) => {
+      if (!isTouchDevice()) return;
       for (const t of e.changedTouches) {
         if (t.identifier !== touch.id) continue;
         const g = toGame(t.clientX, t.clientY);
         touch.x = g.x;
         touch.y = g.y;
-        const dx = touch.x - touch.ox;
-        const dy = touch.y - touch.oy;
-        const d = Math.hypot(dx, dy) || 1;
-        const k = Math.min(1, d / 46); // 摇杆死区/最大行程
-        touch.move.x = (dx / d) * k;
-        touch.move.y = (dy / d) * k;
+        applyStick();
       }
       e.preventDefault();
     },
@@ -175,11 +214,14 @@ export function createInput(canvas) {
     for (const t of e.changedTouches) {
       if (t.identifier === touch.id) {
         touch.id = null;
+        touch.active = false;
         touch.move.x = 0;
         touch.move.y = 0;
       }
-      touch.firing = false;
+      touch.fireIds.delete(t.identifier);
     }
+    // 还有别的手指按在右半屏就继续开火，全松开才停
+    touch.firing = touch.fireIds.size > 0;
   };
   canvas.addEventListener('touchend', endTouch);
   canvas.addEventListener('touchcancel', endTouch);
@@ -190,7 +232,7 @@ export function createInput(canvas) {
     let aimX = p.x + Math.cos(p.aim) * 200;
     let aimY = p.y + Math.sin(p.aim) * 200;
     let firing = touch.firing;
-    const target = nearestEnemyTo(world.enemies);
+    const target = nearestEnemyTo(world.enemies, p);
     if (target) {
       // 提前量：和 AI 用同一套算法
       const d = Math.hypot(target.x - p.x, target.y - p.y);
