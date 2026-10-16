@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NEON CORE // 解限核心</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="hud">
+      <div class="hud-left">
+        <div class="row"><span class="label">WAVE</span><span id="hud-wave" class="value">1</span></div>
+        <div class="row"><span class="label">HP</span><span id="hud-hp" class="value">100</span></div>
+        <div class="bar"><i id="hud-hp-bar" class="hp"></i></div>
+        <div class="row"><span class="label">HEAT</span><span id="hud-heat" class="value">0%</span></div>
+        <div class="bar"><i id="hud-heat-bar" class="heat"></i></div>
+        <div class="row"><span class="label">DASH</span><span id="hud-dash" class="value">READY</span></div>
+        <div class="row"><span class="label">WEAPON</span><span id="hud-weapon" class="value">游侠脉冲</span></div>
+      </div>
+      <div class="hud-right">
+        <div class="row"><span class="label">KILLS</span><span id="hud-kills" class="value">0</span></div>
+        <div class="row"><span class="label">TIME</span><span id="hud-time" class="value">0.0s</span></div>
+      </div>
+    </div>
+    <div id="overlay" class="show">
+      <div class="panel">
+        <h1>NEON <span>CORE</span></h1>
+        <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
+        <ul class="keys">
+          <li><b>W A S D</b> 移动</li>
+          <li><b>鼠标</b> 瞄准 &nbsp;/&nbsp; <b>左键</b> 射击</li>
+          <li><b>空格</b> 冲刺（无敌帧，穿敌）</li>
+          <li><b>1 2 3</b> 选择强化</li>
+        </ul>
+        <p class="hint" id="overlay-hint">按 <b>回车</b> 或点击这里开始</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

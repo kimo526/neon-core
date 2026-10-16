@@ -1,0 +1,12 @@
+{
+  "name": "neon-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NEON CORE // 解限核心 — 一个热管理驱动的机甲 roguelite 竞技场",
+  "scripts": {
+    "test": "node --test tests/",
+    "sim": "node tools/simulate.mjs",
+    "serve": "node tools/serve.mjs"
+  }
+}

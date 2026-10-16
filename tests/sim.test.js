@@ -1,0 +1,360 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { ARENA, STEP, TUNING } from '../src/content.js';
+import { accuracy, chooseCard, createWorld, makeInput, step, waveComposition } from '../src/sim.js';
+import { CARDS, applyCard, createStats, rollCards, cardText } from '../src/upgrades.js';
+import { runHeadless } from '../src/harness.js';
+
+const placeEnemy = (world, x, y, type = 'drone') => {
+  world.enemies.length = 0;
+  world.spawnQueue.length = 0;
+  world.enemies.push({
+    id: 999,
+    type,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    radius: 11,
+    hp: 9999,
+    hpMax: 9999,
+    speed: 0,
+    accel: 0,
+    damage: 0,
+    color: '#fff',
+    ranged: false,
+    fireCd: 0,
+    hurt: 0,
+    spawnT: 0,
+    knockX: 0,
+    knockY: 0,
+    phase: 0,
+    lifeOnHit: 0.02,
+  });
+  return world.enemies[0];
+};
+
+test('新世界状态自洽：玩家满血、有初始波次', () => {
+  const w = createWorld(7);
+  assert.equal(w.player.hp, w.player.stats.hpMax);
+  assert.equal(w.dead, false);
+  assert.equal(w.wave, 1);
+  assert.ok(w.spawnQueue.length > 0, '第 1 波应该排进了生成队列');
+  assert.ok(w.player.x > 0 && w.player.x < ARENA.w);
+});
+
+test('子弹命中敌人才会造成伤害', () => {
+  const w = createWorld(3);
+  const target = placeEnemy(w, 500, 100);
+  w.player.x = 500;
+  w.player.y = 300;
+  const input = { ...makeInput(), aimX: 500, aimY: 100, firing: true };
+  const hp0 = target.hp;
+  for (let i = 0; i < 30 && target.hp === hp0; i++) step(w, input, STEP);
+  assert.ok(target.hp < hp0, '朝敌人射击应该扣血');
+  assert.ok(w.stats.shots > 0);
+  assert.ok(w.stats.hits > 0);
+  assert.ok(accuracy(w) > 0 && accuracy(w) <= 1);
+});
+
+test('不瞄准时打不中（碰撞检测不是无条件命中）', () => {
+  const w = createWorld(3);
+  const target = placeEnemy(w, 500, 100);
+  w.player.x = 500;
+  w.player.y = 300;
+  const input = { ...makeInput(), aimX: 500, aimY: 540, firing: true }; // 朝下打
+  for (let i = 0; i < 40; i++) step(w, input, STEP);
+  assert.equal(target.hp, target.hpMax, '朝反方向开枪不该扣血');
+});
+
+test('按住扳机不散热：连射必须过热（核心节奏）', () => {
+  const w = createWorld(5);
+  placeEnemy(w, 500, 100);
+  w.player.x = 500;
+  w.player.y = 300;
+  const input = { ...makeInput(), aimX: 500, aimY: 100, firing: true };
+  let overheatedAt = -1;
+  for (let i = 0; i < 60 * 3; i++) {
+    step(w, input, STEP);
+    assert.ok(w.player.heat <= w.player.stats.heatMax + 1e-6, `第 ${i} 帧热量超过上限`);
+    if (w.events.some((e) => e.type === 'overheat')) {
+      overheatedAt = i;
+      break;
+    }
+  }
+  assert.ok(overheatedAt > 0, '按住扳机 3 秒内必须过热');
+  assert.ok(overheatedAt / 60 < 2.6, `过热太快了：${(overheatedAt / 60).toFixed(2)}s`);
+
+  // 过热后继续按着：热量不降、也无法开火
+  const shotsAtLock = w.stats.shots;
+  for (let i = 0; i < 60; i++) step(w, input, STEP);
+  assert.equal(w.heatLock, true, '一直按着就不该解锁');
+  assert.equal(w.stats.shots, shotsAtLock, '过热锁期间不应该打出子弹');
+
+  // 松手才开始散热，降到阈值就解锁（惩罚要有，但不能罚站太久）
+  let unlockFrames = 0;
+  for (let i = 0; i < 60 * 5 && w.heatLock; i++) {
+    step(w, { ...input, firing: false }, STEP);
+    unlockFrames++;
+  }
+  assert.equal(w.heatLock, false, '松手后应该解除过热');
+  assert.ok(unlockFrames / 60 < 2.5, `过热惩罚太长：${(unlockFrames / 60).toFixed(2)}s`);
+  assert.ok(
+    w.player.heat <= w.player.stats.heatMax * 0.31,
+    `解锁时热量应该已经降到阈值附近，实际 ${w.player.heat}`
+  );
+
+  // 解锁后能立刻继续开火
+  const before = w.stats.shots;
+  for (let i = 0; i < 30 && w.stats.shots === before; i++) step(w, input, STEP);
+  assert.ok(w.stats.shots > before, '解锁后应该能继续射击');
+});
+
+test('持续射击会过热，过热后停火才能恢复', () => {
+  const w = createWorld(5);
+  const target = placeEnemy(w, 500, 100);
+  w.player.x = 500;
+  w.player.y = 300;
+  const input = { ...makeInput(), aimX: 500, aimY: 100, firing: true };
+  let overheated = false;
+  for (let i = 0; i < 60 * 5 && !overheated; i++) {
+    step(w, input, STEP);
+    overheated = w.events.some((e) => e.type === 'overheat');
+  }
+  assert.ok(overheated, '5 秒连射应该触发过热');
+  assert.ok(w.player.heat >= w.player.stats.heatMax - 1e-6);
+
+  // 松手：热量必须下降并解除锁定
+  const input2 = { ...input, firing: false };
+  const heatAtLock = w.player.heat;
+  for (let i = 0; i < 60 * 4 && w.heatLock; i++) step(w, input2, STEP);
+  assert.ok(w.player.heat < heatAtLock, '松开扳机后热量应该下降');
+  assert.equal(w.heatLock, false, '热量清零后应该解除过热锁');
+  assert.ok(target.hp < target.hpMax, '这段测试期间应该有命中');
+});
+
+test('冲刺提供无敌帧并且会进入冷却', () => {
+  const w = createWorld(11);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  const dash = { ...makeInput(), dash: true, moveX: 1, moveY: 0 };
+  step(w, dash, STEP);
+  assert.ok(w.player.iframe > 0, '冲刺应该给无敌帧');
+  assert.ok(w.player.dashCd > 0, '冲刺应该进入冷却');
+
+  const x1 = w.player.x;
+  const dash2 = { ...dash, moveX: -1 };
+  step(w, dash2, STEP);
+  assert.ok(w.player.x > x1, '冷却中再按冲刺不应该反向位移（说明没被重复触发）');
+});
+
+test('卡片：推进过载缩短冲刺冷却', () => {
+  const w = createWorld(13);
+  const before = w.player.stats.dashCooldown;
+  assert.ok(chooseCard(w, 'thruster'));
+  assert.ok(w.player.stats.dashCooldown < before);
+  assert.equal(w.phase, 'play', '选完卡应该恢复战斗');
+});
+
+test('卡片：二段推进让冲刺能连着放两次，然后才吃冷却', () => {
+  const w = createWorld(17);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  chooseCard(w, 'doublejump');
+  const input = { ...makeInput(), dash: true, moveX: 1, moveY: 0, aimX: 900, aimY: 270 };
+  const idle = { ...input, dash: false };
+  assert.equal(w.player.charges, 2, '拿了二段推进应该一开始就有 2 段充能');
+
+  step(w, input, STEP);
+  assert.ok(w.player.dashT > 0, '第一次冲刺应该生效');
+  assert.equal(w.player.charges, 1, `应该还剩 1 次冲刺，实际 ${w.player.charges}`);
+  assert.equal(w.player.dashCd, 0, '还有充能时不该进冷却');
+
+  // 等第一段冲刺动作结束，第二段立刻能放（不吃冷却）
+  for (let i = 0; i < 12; i++) step(w, idle, STEP);
+  assert.ok(w.player.dashT <= 0, `第一次冲刺应该结束，剩余 ${w.player.dashT}`);
+  step(w, input, STEP);
+  assert.ok(w.player.dashT > 0, '第二段冲刺应该能紧接着放');
+  assert.ok(w.player.dashCd > 0, '充能耗尽后才开始冷却');
+
+  // 两段都用完：这次真的要被冷却挡住
+  for (let i = 0; i < 12; i++) step(w, idle, STEP);
+  const cdBefore = w.player.dashCd;
+  step(w, input, STEP);
+  assert.ok(w.player.dashT <= 0, '充能空、冷却中也还能冲刺就不对了');
+  assert.ok(cdBefore > 0);
+  assert.equal(w.player.charges, 0);
+
+  // 冷却结束后充能回满
+  for (let i = 0; i < 80; i++) step(w, idle, STEP);
+  assert.equal(w.player.charges, 2, `冷却结束后应该回满 2 段，实际 ${w.player.charges}`);
+});
+
+test('没拿二段推进时只有一段冲刺', () => {
+  const w = createWorld(97);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  const input = { ...makeInput(), dash: true, moveX: 1, moveY: 0 };
+  step(w, input, STEP);
+  assert.equal(w.player.charges, 0);
+  for (let i = 0; i < 12; i++) step(w, { ...input, dash: false }, STEP);
+  step(w, input, STEP);
+  assert.ok(w.player.dashT <= 0, '单段冲刺不该能连着放两次');
+});
+
+test('卡片：复合装甲提高上限并立刻修复', () => {
+  const w = createWorld(19);
+  w.player.hp = 40;
+  const max0 = w.player.stats.hpMax;
+  chooseCard(w, 'armor');
+  assert.equal(w.player.stats.hpMax, max0 + 25);
+  assert.equal(w.player.hp, 65);
+});
+
+test('卡片：弹射协议让子弹撞墙反弹而不是消失', () => {
+  const w = createWorld(23);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  chooseCard(w, 'ricochet');
+  w.player.x = 200;
+  w.player.y = 200;
+  const input = { ...makeInput(), aimX: 0, aimY: 200, firing: true }; // 朝左墙打
+  for (let i = 0; i < 60 && w.bullets.length === 0; i++) step(w, input, STEP);
+  assert.ok(w.bullets.length > 0, '应该打出了子弹');
+  for (let i = 0; i < 30; i++) step(w, { ...input, firing: false }, STEP);
+  assert.ok(w.bullets.length > 0, '有弹射协议时子弹应在墙上反弹存活');
+  assert.equal(w.bullets[0].ricochet, 0, '反弹次数应该被消耗');
+});
+
+test('卡片：相位脉冲在冲刺穿过敌人时造成伤害', () => {
+  const w = createWorld(29);
+  const e = placeEnemy(w, 700, 270);
+  w.player.x = 600;
+  w.player.y = 270;
+  chooseCard(w, 'pulse');
+  const hp0 = e.hp;
+  const input = { ...makeInput(), dash: true, moveX: 1, moveY: 0 };
+  for (let i = 0; i < 30; i++) step(w, input, STEP);
+  assert.ok(e.hp < hp0, `冲刺穿过后应该掉血，现在 hp=${e.hp}`);
+});
+
+test('卡片：残骸回收让击杀回血', () => {
+  const w = createWorld(31);
+  chooseCard(w, 'killheal');
+  const e = placeEnemy(w, 300, 270);
+  e.hp = 1;
+  w.player.hp = 50;
+  const before = w.player.hp;
+  const input = { ...makeInput(), aimX: 300, aimY: 270, firing: true };
+  for (let i = 0; i < 60 && w.stats.kills === 0; i++) step(w, input, STEP);
+  assert.equal(w.stats.kills, 1, '应该击杀了目标');
+  assert.ok(w.player.hp > before, '击杀应该回血');
+});
+
+test('波次配比随难度增长，且生成敌人会吃系数', () => {
+  const w1 = waveComposition(1);
+  const w10 = waveComposition(10);
+  assert.ok(w10.length > w1.length, '后面的波次敌人更多');
+  assert.ok(w10.includes('tank'), '第 10 波应该有重甲');
+  assert.ok(w10.some((t) => t === 'turret'), '第 10 波应该有炮台');
+
+  const w = createWorld(37);
+  w.spawnQueue.length = 0;
+  // 手动生成第 10 波并推进时间，让敌人都落地
+  w.wave = 10;
+  w.spawnQueue = waveComposition(10).map((type, i) => ({
+    type,
+    at: 0.001 * i,
+    scale: { hp: Math.pow(1.14, 9), speed: Math.pow(1.025, 9), damage: Math.pow(1.055, 9) },
+  }));
+  w.time = 10;
+  for (let i = 0; i < 5; i++) step(w, makeInput(), STEP);
+  const tank = w.enemies.find((e) => e.type === 'tank');
+  assert.ok(tank, '第 10 波应该刷出 tank');
+  assert.ok(tank.hpMax > 135 * 3, `tank 血量应该被放大，现在 ${tank.hpMax}`);
+});
+
+test('清空一波后会给出三张不重复的强化卡', () => {
+  const w = createWorld(41);
+  w.spawnQueue.length = 0;
+  w.enemies.length = 0;
+  for (let i = 0; i < 60 * 3 && w.phase !== 'upgrade'; i++) step(w, makeInput(), STEP);
+  assert.equal(w.phase, 'upgrade', '清场后应该进入选卡阶段');
+  assert.equal(w.cardChoices.length, TUNING.cardCount);
+  assert.equal(new Set(w.cardChoices).size, TUNING.cardCount, '三张卡不应该重复');
+  assert.ok(w.wave >= 2, '选卡时下一波已经开始排队');
+  assert.equal(chooseCard(w, w.cardChoices[0]), true);
+  assert.equal(w.phase, 'play');
+});
+
+test('抽卡池：权重抽样不重复、能排除、卡池空了也不崩', () => {
+  const rng = () => 0.42;
+  const three = rollCards(rng, 3);
+  assert.equal(three.length, 3);
+  assert.equal(new Set(three.map((c) => c.id)).size, 3);
+  const excluded = rollCards(rng, 3, [three[0].id, three[1].id]);
+  assert.ok(!excluded.some((c) => c.id === three[0].id || c.id === three[1].id));
+  const all = rollCards(rng, 999);
+  assert.equal(all.length, CARDS.length, '要不出超过卡池数量的卡');
+});
+
+test('每张卡都有可读文案和合法效果', () => {
+  const stats = createStats();
+  for (const c of CARDS) {
+    const text = cardText(c, stats);
+    assert.equal(typeof text, 'string');
+    assert.ok(text.length > 0, `${c.id} 缺文案`);
+    assert.ok(c.weight > 0);
+    assert.doesNotThrow(() => c.apply(createStats(), createWorld(1)));
+  }
+  // 记录已选卡，方便 UI/统计
+  const w = createWorld(43);
+  applyCard(w, 'overclock');
+  assert.deepEqual(w.player.stats.taken, ['overclock']);
+});
+
+test('长时间空跑不会出现 NaN / 越界 / 内存爆炸', () => {
+  const w = createWorld(47);
+  w.spawnQueue.length = 0;
+  w.enemies.length = 0;
+  const blank = makeInput();
+  let maxParticles = 0;
+  let maxObjects = 0;
+  for (let i = 0; i < 60 * 240; i++) {
+    w.time = i * STEP; // 让生成队列/波次判定持续推进，模拟真实对局时长
+    step(w, blank, STEP);
+    maxParticles = Math.max(maxParticles, w.particles.length);
+    maxObjects = Math.max(maxObjects, w.particles.length + w.bullets.length + w.enemies.length);
+    assert.ok(Number.isFinite(w.player.x) && Number.isFinite(w.player.y), `第 ${i} 帧玩家坐标 NaN`);
+    assert.ok(w.player.x >= 0 && w.player.x <= ARENA.w, `第 ${i} 帧玩家越界`);
+    assert.ok(w.player.y >= 0 && w.player.y <= ARENA.h, `第 ${i} 帧玩家越界`);
+    for (const e of w.enemies) {
+      assert.ok(Number.isFinite(e.x) && Number.isFinite(e.y), `第 ${i} 帧敌人坐标 NaN`);
+      assert.ok(e.hp > 0, '死掉的敌人应该被清出数组');
+    }
+  }
+  assert.ok(maxParticles < 1200, `粒子数量失控: ${maxParticles}`);
+  assert.ok(maxObjects < 1500, `对象总数失控: ${maxObjects}`);
+  assert.ok(w.bullets.length < 500, '子弹数量失控');
+});
+
+test('多敌人战斗 8 分钟不炸：粒子与实体数量收敛', () => {
+  let maxObjects = 0;
+  let maxHeat = 0;
+  const { metrics } = runHeadless({
+    frames: 60 * 480,
+    seed: 53,
+    revive: true,
+    onFrame: (world) => {
+      maxObjects = Math.max(maxObjects, world.particles.length + world.bullets.length + world.enemies.length);
+      maxHeat = Math.max(maxHeat, world.player.heat);
+      assert.ok(Number.isFinite(world.player.heat), '热量不该变成 NaN');
+      assert.ok(Number.isFinite(world.player.x) && Number.isFinite(world.player.y));
+    },
+  });
+  assert.ok(maxObjects < 6000, `对象总数失控: ${maxObjects}`);
+  assert.ok(maxHeat <= 220, `热量溢出上限: ${maxHeat}`);
+  assert.ok(metrics.kills > 150, `8 分钟只杀了 ${metrics.kills} 个，可能循环卡住了`);
+  assert.ok(metrics.wavesCleared >= 5, `8 分钟只清了 ${metrics.wavesCleared} 波`);
+});
+
