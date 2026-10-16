@@ -21,6 +21,7 @@ const ASSETS = [
   './src/audio.js',
   './src/voice.js',
   './src/hints.js',
+  './src/qr.js',
 ];
 
 self.addEventListener('install', (e) => {

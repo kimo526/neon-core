@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { encodeQr, qrToText } from '../src/qr.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.argv[2] ?? 8787);
@@ -66,8 +67,26 @@ server.listen(port, host, () => {
   process.stdout.write(`NEON CORE 已启动\n`);
   process.stdout.write(`  本机：   http://127.0.0.1:${port}/\n`);
   if (lan) {
-    for (const ip of lanAddresses()) {
+    const ips = lanAddresses();
+    for (const ip of ips) {
       process.stdout.write(`  局域网： http://${ip}:${port}/   ← 同一个 WiFi 下手机/朋友直接开这个\n`);
+    }
+    // 终端里印一个二维码：手机相机对着扫一下就进游戏，不用手输 IP
+    if (ips.length) {
+      const url = `http://${ips[0]}:${port}/`;
+      try {
+        const qr = encodeQr(url);
+        process.stdout.write(`\n  手机扫码直接进（相机对着这个扫）：\n\n`);
+        process.stdout.write(
+          qrToText(qr, { quiet: 2 })
+            .split('\n')
+            .map((l) => '  ' + l)
+            .join('\n') + '\n\n'
+        );
+        process.stdout.write(`  ${url}\n`);
+      } catch (e) {
+        process.stdout.write(`  （二维码生成失败：${e.message}）\n`);
+      }
     }
   } else {
     process.stdout.write(`  （想让别人也能连：node tools/serve.mjs ${port} lan）\n`);

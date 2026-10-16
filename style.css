@@ -373,6 +373,35 @@ body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px
 .panel .keys.score { text-align: left; gap: 10px; }
 .panel .keys.score .dim { color: #7c93a8; font-size: 0.9em; }
 
+/* 标题页的分享二维码 */
+.panel .hint.share { margin-top: 10px; color: #8fb4cc; }
+.qr-holder {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 8px auto 4px;
+  padding: 8px;
+  background: #071019;
+  border: 1px solid var(--line);
+}
+
+canvas.qr {
+  display: block;
+  width: clamp(96px, 16vh, 148px);
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.qr-label {
+  font-size: 10.5px;
+  color: var(--neon);
+  letter-spacing: 0.02em;
+  word-break: break-all;
+  max-width: 200px;
+  text-align: center;
+}
+
 .card {
   width: clamp(140px, 22vw, 200px);
   padding: 12px 12px;

@@ -5,8 +5,9 @@
   "type": "module",
   "description": "NEON CORE // 解限核心 — 热管理驱动的机甲 roguelite 竞技场（双人 / 弹幕 Boss / 极限模式 / PWA）",
   "scripts": {
-    "test": "node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js tests/extreme.test.js",
+    "test": "node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js tests/extreme.test.js tests/qr.test.js",
     "start": "node tools/serve.mjs",
+    "share": "node tools/serve.mjs 8787 lan",
     "sim": "node tools/simulate.mjs",
     "sim:coop": "node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2",
     "proc-rate": "node tools/proc-rate.mjs 180 4",

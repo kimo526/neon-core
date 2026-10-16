@@ -19,7 +19,7 @@
 | **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 一个 https 链接，最快 |
 | **Cloudflare Pages** | 连接仓库或直接上传，构建命令留空、输出目录填 `/` | 一个 https 链接 |
 | **GitHub Pages** | 见下 | `https://<你>.github.io/neon-core/` |
-| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`），它会打印出 `http://192.168.x.x:8787/` | 同一个 WiFi 下，朋友/手机直接开这个链接 |
+| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`）——终端会**直接印一个二维码**，手机相机对着扫就进游戏 | 同一个 WiFi 下手机/朋友立刻能玩 |
 
 GitHub Pages 的话：
 
@@ -138,7 +138,7 @@ tools/            静态服务器 / 平衡台 / 触发率实测 / 无头截图�
 ## 开发
 
 ```bash
-node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js tests/extreme.test.js   # 62 个测试
+node --test tests/*.test.js                        # 69 个测试（含二维码往返解码自验证）
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300        # 单人平衡台
 node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2      # 双人平衡台
 node tools/proc-rate.mjs 180 4                     # 实测特殊攻击多久出一次
@@ -147,6 +147,10 @@ node tools/headless.mjs solo 30 --boss             # 召出弹幕 Boss，弹幕�
 node tools/headless.mjs solo 20 --proc=0.05        # 强制特殊攻击，专截红黑特效
 node tools/make-icon.mjs                           # 重新生成 PWA 图标（零依赖，手写 PNG 编码）
 ```
+
+`src/qr.js` 是个零依赖的二维码编码器（版本 1–6、字节模式、纠错 M），用来印局域网分享码。
+它自带一个**解码器测试**（`tests/qr.test.js`）：把编出来的码解回原文比对，再校验 Reed-Solomon
+纠错自洽、格式信息、三个定位图形和定时图形——二维码最容易"看着对但扫不出来"，所以必须端到端验。
 
 改手感只需要动 `src/content.js` 里的 `TUNING` / `WEAPONS` / `ENEMY_TYPES` / `COOP` / `GRAZE` / `MODES`；想加新弹幕就往 `src/patterns.js` 的 `PATTERNS` 里加一条（`{ name, cd, fn }`）。
 

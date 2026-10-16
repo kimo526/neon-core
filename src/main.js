@@ -9,6 +9,7 @@ import { createVoice } from './voice.js';
 import { createHints } from './hints.js';
 import { createBot } from './bot.js';
 import { pickCard as pickSmartCard } from './harness.js';
+import { encodeQr } from './qr.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
@@ -119,6 +120,57 @@ function hideOverlay() {
   cardIds = [[]];
 }
 
+/**
+ * 把当前地址画成二维码，方便手机扫（只有非 localhost 才有意义）。
+ * 返回 HTML 字符串；canvas 会在插入 DOM 后由 attachShareQr 补上。
+ */
+let pendingQr = null;
+function shareQrMarkup() {
+  const host = location.hostname;
+  if (!host || host === 'localhost' || host === '127.0.0.1' || location.protocol === 'file:') {
+    return `<p class="hint share">想让手机玩：电脑上双击 <b>share.cmd</b>，终端里会直接印出一个二维码</p>`;
+  }
+  try {
+    const url = location.origin + location.pathname;
+    const qr = encodeQr(url);
+    const canvas = document.createElement('canvas');
+    const scale = 3;
+    const quiet = 2;
+    const px = (qr.size + quiet * 2) * scale;
+    canvas.width = px;
+    canvas.height = px;
+    canvas.className = 'qr';
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#eafcff';
+    ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = '#05060b';
+    for (let y = 0; y < qr.size; y++) {
+      for (let x = 0; x < qr.size; x++) {
+        if (qr.modules[y][x]) ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+      }
+    }
+    pendingQr = { canvas, url };
+    return `<p class="hint share">手机扫码直接进（同一个 WiFi）：</p><div id="qr-slot"></div>`;
+  } catch {
+    return '';
+  }
+}
+
+/** innerHTML 之后把二维码画布插进去（canvas 没法走 HTML 字符串） */
+function attachShareQr() {
+  const slot = panel.querySelector('#qr-slot');
+  if (!slot || !pendingQr) return;
+  const holder = document.createElement('div');
+  holder.className = 'qr-holder';
+  const label = document.createElement('div');
+  label.className = 'qr-label';
+  label.textContent = pendingQr.url;
+  holder.appendChild(pendingQr.canvas);
+  holder.appendChild(label);
+  slot.appendChild(holder);
+  pendingQr = null;
+}
+
 function titleScreen() {
   uiMode = 'title';
   setOverlay(`
@@ -134,8 +186,10 @@ function titleScreen() {
     <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
     <p class="hint"><b>回车</b> 单人 &nbsp;·&nbsp; <b>Tab</b> 双人 &nbsp;·&nbsp; <b>X</b> 极限（不回血）&nbsp;·&nbsp; <b>C</b> 双人极限</p>
     <p class="hint">手机：左半屏拖动移动 · 右半屏点一下冲刺 · 子弹自动索敌</p>
+    ${shareQrMarkup()}
     <p class="hint">或点击这里开始标准单人</p>
   `);
+  attachShareQr();
 }
 
 function startRun(playerCount = 1, gameMode = 'standard') {
