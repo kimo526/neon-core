@@ -133,6 +133,11 @@ function hideOverlay() {
   cardIds = [[]];
 }
 
+/** 当前是不是触摸设备（和 input.js 用同一套判定） */
+function isTouchDevice() {
+  return (navigator.maxTouchPoints ?? 0) > 0 || window.matchMedia('(pointer: coarse)').matches;
+}
+
 /**
  * 把当前地址画成二维码，方便手机扫（只有非 localhost 才有意义）。
  * 返回 HTML 字符串；canvas 会在插入 DOM 后由 attachShareQr 补上。
@@ -140,7 +145,10 @@ function hideOverlay() {
 let pendingQr = null;
 function shareQrMarkup() {
   const host = location.hostname;
-  if (!host || host === 'localhost' || host === '127.0.0.1' || location.protocol === 'file:') {
+  const local = !host || host === 'localhost' || host === '127.0.0.1' || location.protocol === 'file:';
+  if (local) {
+    // 已经用手机打开了，就别再教人家"用电脑扫码"
+    if (isTouchDevice()) return '';
     return `<p class="hint share">想让手机玩：电脑上双击 <b>share.cmd</b>，终端里会直接印出一个二维码</p>`;
   }
   try {
@@ -192,6 +200,7 @@ function titleScreen() {
     <p class="sub">热量会锁枪 · 冲刺能穿敌 · 每 5 波一个弹幕核心</p>
     <p class="hint start">按 <b>回车</b> 单人 &nbsp;·&nbsp; <b>Tab</b> 双人 &nbsp;·&nbsp; <b>X</b> 极限 &nbsp;·&nbsp; <b>C</b> 双人极限 &nbsp;·&nbsp; 或点击这里</p>
     ${shareQrMarkup()}
+    ${isTouchDevice() ? `<p class="hint touch">左半屏拖动 = 移动 · 右半屏点一下 = 冲刺 · 子弹自动索敌<br><b>横过来玩视野更好</b></p>` : ''}
     <details class="more">
       <summary>按键说明</summary>
       <ul class="keys">

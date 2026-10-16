@@ -51,6 +51,9 @@ canvas#game {
   border: 1px solid #1d3852;
   box-shadow: 0 0 60px #0a2740 inset, 0 0 40px #0008;
   background: #05060b;
+  /* ★ 手机上必须关掉浏览器手势：否则拖动会被当成滚动/下拉刷新，
+     canvas 中途收到 touchcancel，摇杆会突然断掉 */
+  touch-action: none;
 }
 
 /* ---------- 侧边操作提示 ---------- */
