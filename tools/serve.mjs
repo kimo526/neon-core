@@ -24,6 +24,11 @@ const TYPES = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  // 音频必须给对 MIME，否则 iOS Safari 会直接拒播
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
 };
 
 const server = createServer(async (req, res) => {
@@ -42,8 +47,36 @@ const server = createServer(async (req, res) => {
       return;
     }
     const body = await readFile(target);
+    const type = TYPES[extname(target)] ?? 'application/octet-stream';
+
+    // ★ 必须支持 Range 请求：iOS Safari 播放音频/视频时强制要求 206 分片，
+    //   否则它会一直卡在加载状态（表现为"没声音"）
+    const range = req.headers.range;
+    if (range) {
+      const m = /bytes=(\d*)-(\d*)/.exec(range);
+      if (m) {
+        const start = m[1] ? Number(m[1]) : 0;
+        const end = m[2] ? Math.min(Number(m[2]), body.length - 1) : body.length - 1;
+        if (Number.isNaN(start) || start >= body.length) {
+          res.writeHead(416, { 'Content-Range': `bytes */${body.length}` }).end();
+          return;
+        }
+        res.writeHead(206, {
+          'Content-Type': type,
+          'Content-Length': end - start + 1,
+          'Content-Range': `bytes ${start}-${end}/${body.length}`,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-store',
+        });
+        res.end(body.subarray(start, end + 1));
+        return;
+      }
+    }
+
     res.writeHead(200, {
-      'Content-Type': TYPES[extname(target)] ?? 'application/octet-stream',
+      'Content-Type': type,
+      'Content-Length': body.length,
+      'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store',
     });
     res.end(body);

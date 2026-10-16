@@ -21,7 +21,9 @@ const P2_KEYS = [
 
 const SYS_KEYS = [
   ['Esc', '暂停'],
-  ['M', '静音'],
+  ['M', '静音（全部）'],
+  ['N', '音乐开关'],
+  ['[ ]', '音乐音量'],
   ['V', '播报开关'],
   ['G', 'AI 托管'],
 ];
@@ -47,6 +49,7 @@ export function createHints(root) {
           </div>
           <div class="hints-stats" id="hints-stats"></div>
         </div>
+        <div class="hints-block" id="hints-audio"></div>
         <div class="hints-foot">
           <div id="hints-special"></div>
           <div class="hints-note">热量满了会锁枪 —— 想降温必须松开扳机</div>
@@ -107,5 +110,27 @@ export function createHints(root) {
       .join('');
   }
 
-  return { update, build };
+  return { update, build, updateAudio };
+}
+
+/** 音响状态：BGM 曲目/音量、音效与播报开关（每帧刷，不重建 DOM） */
+let lastAudioKey = '';
+function updateAudio(info) {
+  if (!built) build();
+  const host = root.querySelector('#hints-audio');
+  if (!host) return;
+  const key = `${info.musicOn}|${Math.round(info.musicVolume * 10)}|${info.musicLabel}|${info.sfxOn}|${info.voiceOn}`;
+  if (key === lastAudioKey) return;
+  lastAudioKey = key;
+  const pct = Math.round(info.musicVolume * 100);
+  host.innerHTML = `
+    <div class="hints-title" style="color:var(--neon)">音频</div>
+    <div class="hints-row"><b>♪ BGM</b><span>${info.musicOn ? `${pct}%` : '已关闭'}</span></div>
+    <div class="hints-note" style="color:${info.musicOn ? '#8fb4cc' : '#5c707f'}">${
+      info.musicOn ? info.musicLabel ?? '（等待播放）' : '按 N 打开音乐'
+    }</div>
+    <div class="hints-row"><b>音效</b><span>${info.sfxOn ? '开' : '关'}</span></div>
+    <div class="hints-row"><b>播报</b><span>${info.voiceOn ? '开' : '关'}</span></div>
+    <div class="hints-row"><b>M / N / [ ]</b><span>静音 / 音乐 / 音量</span></div>
+  `;
 }

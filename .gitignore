@@ -1,0 +1,10 @@
+# 开发/临时文件，不要进仓库
+headless-*.png
+public-url.txt
+public-url.html
+assets/icon.svg
+node_modules/
+*.log
+
+# 本机工具产生的临时文件
+/tmp/

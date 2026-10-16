@@ -1,7 +1,8 @@
 // Service Worker：让游戏能离线玩 / 装到桌面。
-// 策略很简单：同源资源一律 cache-first，后台顺手更新（stale-while-revalidate）。
-// 这样断网、或者托管在慢速静态站上，第二次打开都是秒进。
-const CACHE = 'neon-core-v2';
+// 策略：stale-while-revalidate —— 先给缓存（秒开），同时后台拉新版更新缓存。
+//
+// ★ 改了 src/ 下任何文件，必须把 CACHE 的版本号 +1，否则老玩家会一直拿到旧代码。
+const CACHE = 'neon-core-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +10,10 @@ const ASSETS = [
   './manifest.webmanifest',
   './assets/icon-512.png',
   './assets/icon-192.png',
+  // BGM：离线也要能听（首次加载后会缓存，之后断网可播）
+  './assets/music/theme.mp3',
+  './assets/music/battle.mp3',
+  './assets/music/ending.mp3',
   './src/main.js',
   './src/sim.js',
   './src/content.js',
@@ -22,6 +27,7 @@ const ASSETS = [
   './src/voice.js',
   './src/hints.js',
   './src/qr.js',
+  './src/music.js',
 ];
 
 self.addEventListener('install', (e) => {

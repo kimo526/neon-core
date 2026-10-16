@@ -6,6 +6,7 @@ import { createInput } from './input.js';
 import { createRenderer } from './render.js';
 import { createAudio } from './audio.js';
 import { createVoice } from './voice.js';
+import { createMusic } from './music.js';
 import { createHints } from './hints.js';
 import { createBot } from './bot.js';
 import { pickCard as pickSmartCard } from './harness.js';
@@ -32,6 +33,8 @@ const voice = createVoice(
   () => audio.context,
   () => audio.bus
 );
+// BGM：标题/结算放片尾曲，战斗放主题曲（都来自你自己的《解限机》专辑）
+const music = createMusic();
 // 侧边操作提示面板（静态按键 + 实时 Boss 血条 / 擦弹充能）
 const hints = createHints(document.getElementById('hints'));
 
@@ -201,6 +204,8 @@ function titleScreen() {
     </details>
     <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
     <p class="hint">贴着弹幕走能攒<b>擦弹充能</b>，满了补 1 段冲刺 + 护盾</p>
+    <p class="hint">BGM（你的原创专辑）：主题曲《解限》 · Boss 战《十七秒》 · 结算《下个赛季见》</p>
+    <p class="hint"><b>M</b> 静音 · <b>N</b> 音乐开关 · <b>[ ]</b> 音乐音量</p>
   `);
   attachShareQr();
 }
@@ -209,6 +214,7 @@ function startRun(playerCount = 1, gameMode = 'standard') {
   world = createWorld((Math.random() * 1e9) | 0, { playerCount, mode: gameMode });
   input.clear();
   audio.unlock();
+  music.unlock();
   acc = 0;
   uiMode = 'running';
   buildHud();
@@ -301,7 +307,17 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
 
-  if (input.takeSoundToggle()) audio.toggle();
+  if (input.takeSoundToggle()) {
+    // M = 总静音：音效和 BGM 一起
+    audio.toggle();
+    music.toggle();
+  }
+  if (input.takeMusicToggle()) {
+    const on = music.toggle();
+    if (on) music.unlock();
+  }
+  const musicVol = input.takeMusicVolume();
+  if (musicVol) music.setVolume(music.volume + musicVol);
   if (input.takeVoiceToggle()) {
     const on = voice.toggle();
     if (on) voice.announce('clear', { now: world.time, force: true });
@@ -378,6 +394,7 @@ function frame(now) {
     if (acc > STEP * stepsAllowed) acc = 0;
   }
   audio.update(world, dt);
+  music.update({ uiMode, dead: world.dead, boss: world.enemies.some((e) => e.boss) }, dt);
 
   if (uiMode === 'running' && world.dead) {
     uiMode = 'dying';
@@ -397,6 +414,13 @@ function frame(now) {
   renderer.draw(world, { mouse: input.pos, touchStick: input.touchState });
   updateHud();
   hints.update(world);
+  hints.updateAudio({
+    musicOn: music.enabled,
+    musicVolume: music.volume,
+    musicLabel: music.trackLabel,
+    sfxOn: audio.enabled,
+    voiceOn: voice.enabled,
+  });
 }
 
 function attachBot(autoPick = true) {
@@ -415,6 +439,7 @@ function detachBot() {
 overlay.addEventListener('click', (e) => {
   if (e.target.closest('.card')) return;
   audio.unlock();
+  music.unlock();
   if (uiMode === 'title') startRun(1, 'standard');
   else if (uiMode === 'paused') {
     uiMode = 'running';
@@ -427,6 +452,12 @@ window.addEventListener('blur', () => {
     uiMode = 'paused';
     setOverlay(`<h1>PAUSED</h1><p class="sub">窗口失焦，自动暂停。</p><p class="hint">点击这里继续</p>`);
   }
+});
+
+// 切到别的标签页时停掉音乐（省电，也避免"后台还在响"）
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) music.suspend();
+  else music.resume({ uiMode, dead: world.dead, boss: world.enemies.some((e) => e.boss) });
 });
 
 // 窄屏把提示面板折到下面的媒体查询里，标题页要额外处理（见 style.css 的 body.title-open）
@@ -474,6 +505,17 @@ window.NEON = {
   start: startRun,
   pick: pickCard,
   audio,
+  music: {
+    get enabled() {
+      return music.enabled;
+    },
+    get track() {
+      return music.trackLabel;
+    },
+    toggle: () => music.toggle(),
+    setVolume: (v) => music.setVolume(v),
+    debug: () => music.debug(),
+  },
   voice: {
     get enabled() {
       return voice.enabled;

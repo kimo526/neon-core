@@ -24,7 +24,18 @@ function aimAngleFromKeys(held, keys) {
 
 export function createInput(canvas) {
   const keys = new Set();
-  const state = { mx: 0, my: 0, lmb: false, dash1: false, dash2: false, pausePressed: false, soundPressed: false, voicePressed: false };
+  const state = {
+    mx: 0,
+    my: 0,
+    lmb: false,
+    dash1: false,
+    dash2: false,
+    pausePressed: false,
+    soundPressed: false,
+    voicePressed: false,
+    musicPressed: false,
+    musicVol: 0,
+  };
   const pos = { x: ARENA.w / 2, y: ARENA.h / 2 };
   let pressedKeys = [];
 
@@ -45,6 +56,10 @@ export function createInput(canvas) {
     if (e.code === 'Escape') state.pausePressed = true;
     if (e.code === 'KeyM') state.soundPressed = true;
     if (e.code === 'KeyV') state.voicePressed = true;
+    if (e.code === 'KeyN') state.musicPressed = true;
+    // 音乐音量： [ 减小  ] 增大
+    if (e.code === 'BracketLeft') state.musicVol = -0.1;
+    if (e.code === 'BracketRight') state.musicVol = 0.1;
     if (
       ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Semicolon', 'Slash'].includes(
         e.code
@@ -275,6 +290,17 @@ export function createInput(canvas) {
     takeVoiceToggle() {
       const v = state.voicePressed;
       state.voicePressed = false;
+      return v;
+    },
+    takeMusicToggle() {
+      const v = state.musicPressed;
+      state.musicPressed = false;
+      return v;
+    },
+    /** 返回这一帧的音乐音量增量（0 = 没按） */
+    takeMusicVolume() {
+      const v = state.musicVol;
+      state.musicVol = 0;
       return v;
     },
     clear() {
