@@ -18,11 +18,10 @@
 
 | 方式 | 操作 | 得到 |
 | --- | --- | --- |
-| **公网隧道（手机最稳）** | 双击 `share-online.cmd` —— 自动起服务器 + cloudflared 隧道，终端直接印出地址和二维码 | 一个 `https://xxx.trycloudflare.com` 链接，**手机 4G/5G 也能开**，HTTPS 让 PWA/离线缓存生效 |
-| **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 固定 https 链接，最快 |
-| **Cloudflare Pages** | 连接仓库或直接上传，构建命令留空、输出目录填 `/` | 固定 https 链接 |
-| **GitHub Pages** | 见下 | `https://<你>.github.io/neon-core/` |
-| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`）——终端会**直接印一个二维码** | 同一个 WiFi 下手机立刻能玩 |
+| **已经部署好了** | <https://kimo526.github.io/neon-core/> | 永久地址，直接发人 |
+| **公网隧道（改完想立刻给人看）** | 双击 `分享给朋友.cmd` —— 自动起服务器 + cloudflared 隧道，终端印出地址和二维码 | `https://xxx.trycloudflare.com`，**手机 4G/5G 也能开** |
+| **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 另一个固定 https 链接 |
+| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`）—— 终端会**直接印一个二维码** | 同一个 WiFi 下手机立刻能玩 |
 
 > **手机连不上局域网怎么办？** 先分清楚是谁的问题：跑 `node tools/net-probe.mjs`，它会同时在几个端口监听并打印每一个进来的连接。
 > 手机访问后如果**日志一条都没有**，说明数据包根本没到电脑 —— 要么是防火墙（右键 `fix-phone-access.cmd` → 以管理员身份运行），要么是路由器开了"AP 隔离/设备隔离"（这种情况无解，直接用 `share-online.cmd` 走公网隧道）。
@@ -92,6 +91,20 @@ git push -u origin main
 | **极限** | `X`（双人极限 `C`） | **结构值不可回复**。所有回血一律转成护盾（上限 30），大奖也只给护盾 + 3 秒无敌 |
 
 极限模式里"回血卡"不是废卡——它们变成护盾来源；但你也**绝对不可能靠它们续命**。AI 实测：标准模式跑 200 秒还满场飞，极限模式平均 112 秒就撑不住了。血量低于 30% 时 HUD 会闪红、音效会给心跳声。
+
+## 音乐
+
+BGM 用的是**你自己的原创专辑**《解限机穿越小说》的纯音乐版（`assets/music/`）：
+
+| 曲目 | 用在哪 | 文件 |
+| --- | --- | --- |
+| 《解限》主题曲 | 常规战斗 | `theme.mp3`（5.5MB） |
+| 《十七秒》战斗曲（燃版） | **Boss 登场时**自动切换 | `battle.mp3`（4.8MB） |
+| 《下个赛季见》片尾曲 | 标题页 / 结算 | `ending.mp3`（8.7MB） |
+
+选曲逻辑在 `src/music.js`：`pickTrack()` 是个纯函数（有单测），双向交叉淡入淡出，暂停/选卡时压低音量，切到别的标签页自动停。想换歌就改 `TRACKS` 表；想调选曲规则改 `pickTrack`，然后跑 `node --test tests/music.test.js`。
+
+按键：**M** 总静音 · **N** 音乐开关 · **[** **]** 音乐音量。侧栏「音频」区会显示当前曲目和音量。
 
 ## 操作
 
