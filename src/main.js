@@ -13,7 +13,16 @@ import { encodeQr } from './qr.js';
 
 const canvas = document.getElementById('game');
 const overlay = document.getElementById('overlay');
-const panel = overlay.querySelector('.panel');
+// #overlay 在 HTML 里是空的：面板由这里创建，保证 JS 一定拿得到（不依赖 HTML 里有没有手写 .panel）
+let panel = overlay.querySelector('.panel');
+function ensurePanel() {
+  if (!panel || !panel.isConnected) {
+    panel = document.createElement('div');
+    panel.className = 'panel';
+    overlay.appendChild(panel);
+  }
+  return panel;
+}
 const hudRoot = document.getElementById('hud');
 const input = createInput(canvas);
 const renderer = createRenderer(canvas);
@@ -110,13 +119,14 @@ function updateHud() {
 
 // ---------- 遮罩层 ----------
 function setOverlay(html, { clickable = true } = {}) {
-  panel.innerHTML = html;
+  ensurePanel().innerHTML = html;
   overlay.classList.add('show');
   overlay.style.cursor = clickable ? 'pointer' : 'default';
 }
 
 function hideOverlay() {
   overlay.classList.remove('show');
+  document.body.classList.remove('title-open');
   cardIds = [[]];
 }
 
@@ -158,7 +168,7 @@ function shareQrMarkup() {
 
 /** innerHTML 之后把二维码画布插进去（canvas 没法走 HTML 字符串） */
 function attachShareQr() {
-  const slot = panel.querySelector('#qr-slot');
+  const slot = ensurePanel().querySelector('#qr-slot');
   if (!slot || !pendingQr) return;
   const holder = document.createElement('div');
   holder.className = 'qr-holder';
@@ -173,21 +183,24 @@ function attachShareQr() {
 
 function titleScreen() {
   uiMode = 'title';
+  document.body.classList.add('title-open');
   setOverlay(`
     <h1>NEON <span>CORE</span></h1>
-    <p class="sub">突入熔炉竞技场，把核心烧穿。</p>
-    <ul class="keys">
-      <li><b>单人</b>：WASD + 鼠标 + 空格冲刺</li>
-      <li><b>P2</b>：<b>IJKL</b> 移动 · <b>方向键</b> 瞄准 · <b>分号</b> 射击 · <b>回车</b> 冲刺</li>
-      <li>换武器 <b>1</b>/<b>2</b>（P2 用 <b>8</b>/<b>9</b>） · 选卡 <b>1 2 3</b>（P2 用 <b>8 9 0</b>）</li>
-      <li><b>Esc</b> 暂停 · <b>M</b> 静音 · <b>V</b> 播报 · <b>G</b> AI 托管</li>
-    </ul>
-    <p class="hint">每 5 波来一个<b>弹幕核心</b>：贴着弹幕走能攒<b>擦弹充能</b>，满了补冲刺</p>
-    <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
-    <p class="hint"><b>回车</b> 单人 &nbsp;·&nbsp; <b>Tab</b> 双人 &nbsp;·&nbsp; <b>X</b> 极限（不回血）&nbsp;·&nbsp; <b>C</b> 双人极限</p>
-    <p class="hint">手机：左半屏拖动移动 · 右半屏点一下冲刺 · 子弹自动索敌</p>
+    <p class="sub">热量会锁枪 · 冲刺能穿敌 · 每 5 波一个弹幕核心</p>
+    <p class="hint start">按 <b>回车</b> 单人 &nbsp;·&nbsp; <b>Tab</b> 双人 &nbsp;·&nbsp; <b>X</b> 极限 &nbsp;·&nbsp; <b>C</b> 双人极限 &nbsp;·&nbsp; 或点击这里</p>
     ${shareQrMarkup()}
-    <p class="hint">或点击这里开始标准单人</p>
+    <details class="more">
+      <summary>按键说明</summary>
+      <ul class="keys">
+        <li><b>P1</b>：WASD 移动 · 鼠标瞄准 · 左键射击 · 空格冲刺 · 1/2 换武器</li>
+        <li><b>P2</b>：IJKL 移动 · 方向键瞄准 · 分号射击 · 回车冲刺 · 8/9 换武器</li>
+        <li>选强化卡：P1 按 <b>1 2 3</b>，P2 按 <b>8 9 0</b></li>
+        <li><b>Esc</b> 暂停 · <b>M</b> 静音 · <b>V</b> 播报 · <b>G</b> 让 AI 接管</li>
+        <li>手机：左半屏拖动移动 · 右半屏点一下冲刺 · 子弹自动索敌</li>
+      </ul>
+    </details>
+    <p class="hint">热量满了会自动锁枪 —— <b>想降温必须松开扳机</b></p>
+    <p class="hint">贴着弹幕走能攒<b>擦弹充能</b>，满了补 1 段冲刺 + 护盾</p>
   `);
   attachShareQr();
 }
@@ -268,9 +281,11 @@ function renderUpgrade() {
   `,
     { clickable: false }
   );
-  panel.querySelectorAll('.card[data-id]').forEach((el) => {
-    el.addEventListener('click', () => pickCard(el.dataset.id, Number(el.dataset.pid)));
-  });
+  ensurePanel()
+    .querySelectorAll('.card[data-id]')
+    .forEach((el) => {
+      el.addEventListener('click', () => pickCard(el.dataset.id, Number(el.dataset.pid)));
+    });
   cardIds = world.cardChoices.map((ids) => ids.slice());
 }
 
@@ -414,6 +429,7 @@ window.addEventListener('blur', () => {
   }
 });
 
+// 窄屏把提示面板折到下面的媒体查询里，标题页要额外处理（见 style.css 的 body.title-open）
 buildHud();
 titleScreen();
 requestAnimationFrame(frame);

@@ -289,8 +289,10 @@ body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px
 #overlay {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
   background: #04060bcc;
   backdrop-filter: blur(2px);
   opacity: 0;
@@ -306,9 +308,67 @@ body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px
   border: 1px solid #234a68;
   background: #070c14e6;
   box-shadow: 0 0 40px #0d3a5c66;
-  width: min(92%, 860px);
-  max-height: 92%;
+  width: min(94%, 860px);
+  max-width: 100%;
+  /* flex 子元素默认 min-height:auto，会导致内容超高时无法收缩 → 底部被裁掉 */
+  min-height: 0;
+  max-height: 100%;
   overflow: auto;
+}
+
+/* 标题页：画布收起来（静态画面没信息量），把整屏让给标题/二维码/提示 */
+body.title-open .stage-inner { display: none; }
+
+body.title-open #stage {
+  align-items: stretch;
+  gap: 12px;
+  padding: 10px;
+}
+
+body.title-open #overlay {
+  /* 标题页：遮罩层不再是绝对定位的覆盖层，而是 #stage 里的一个 flex 兄弟，
+     这样能拿到"整屏高度"（画布已经收起来了） */
+  position: static;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  overflow: auto;
+}
+
+body.title-open .panel {
+  width: min(100%, 860px);
+  max-width: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+
+body.title-open #hints {
+  flex: 0 1 240px;
+  max-height: 100%;
+}
+
+/* 窄屏（手机竖屏）：面板要能塞进屏幕，不然内容会被裁掉 */
+@media (max-width: 620px) {
+  .panel {
+    padding: 14px 12px;
+  }
+  .panel h1 {
+    letter-spacing: 0.12em;
+  }
+  .panel .keys,
+  .panel .hint {
+    font-size: 11px;
+  }
+  .panel .keys {
+    gap: 4px;
+    margin-bottom: 10px;
+  }
 }
 
 .panel h1 {
@@ -374,7 +434,32 @@ body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px
 .panel .keys.score .dim { color: #7c93a8; font-size: 0.9em; }
 
 /* 标题页的分享二维码 */
-.panel .hint.share { margin-top: 10px; color: #8fb4cc; }
+.panel .hint.share { margin: 4px 0 2px; color: #8fb4cc; }
+.panel .hint.start {
+  margin: 8px 0;
+  padding: 7px 10px;
+  border: 1px solid #23506e;
+  background: #0a1622;
+  font-size: clamp(11px, 1.2vw, 14px);
+  color: #b9d7ea;
+}
+
+/* 按键说明折叠起来：手机上先看到"开始"和二维码，想看细节再展开 */
+.panel details.more {
+  margin: 6px 0;
+  text-align: left;
+}
+.panel details.more > summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 11.5px;
+  padding: 4px 0;
+  list-style: none;
+}
+.panel details.more > summary::before { content: '▸ '; color: var(--neon); }
+.panel details.more[open] > summary::before { content: '▾ '; }
+.panel details.more .keys { margin: 6px 0 2px; }
+
 .qr-holder {
   display: inline-flex;
   flex-direction: column;
@@ -388,10 +473,15 @@ body.extreme #hints .hints-head .dot { background: #ff4d6d; box-shadow: 0 0 10px
 
 canvas.qr {
   display: block;
-  width: clamp(96px, 16vh, 148px);
+  /* 用 max-width 而不是固定宽：窄屏上二维码不能被面板裁掉 */
+  width: min(150px, 34vh, 100%);
+  max-width: 100%;
   height: auto;
+  aspect-ratio: 1 / 1;
   image-rendering: pixelated;
 }
+
+.qr-holder { max-width: 100%; }
 
 .qr-label {
   font-size: 10.5px;
