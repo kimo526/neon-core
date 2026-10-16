@@ -8,6 +8,7 @@
     "test": "node --test tests/sim.test.js tests/balance.test.js tests/coop.test.js tests/danmaku.test.js tests/extreme.test.js tests/qr.test.js",
     "start": "node tools/serve.mjs",
     "share": "node tools/serve.mjs 8787 lan",
+    "probe": "node tools/net-probe.mjs",
     "sim": "node tools/simulate.mjs",
     "sim:coop": "node tools/simulate.mjs 1,2,3,4,5,6,7,8 300 2",
     "proc-rate": "node tools/proc-rate.mjs 180 4",

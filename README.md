@@ -3,12 +3,14 @@
 一个"热管理驱动"的机甲 roguelite 竞技场，支持**本地双人合作**、**弹幕 Boss** 和**极限模式（不回血）**。纯 JS + Canvas，没有依赖、没有构建步骤、没有素材文件。
 
 ```
-双击 start.cmd       # 或者：  node tools/serve.mjs   然后打开 http://127.0.0.1:8787/
+双击 start.cmd         # 本机玩
+双击 share.cmd         # 局域网：手机连同一个 WiFi，扫码就进
+双击 share-online.cmd  # 公网：手机 4G/5G 也能开（临时地址，每次重启会变）
 ```
 
-> ES module 在 `file://` 下会被浏览器 CORS 拦掉，所以必须走 http。`start.cmd` 已经包好了这一步。
+> ES module 在 `file://` 下会被浏览器 CORS 拦掉，所以必须走 http。上面几个脚本都包好了这一步。
 >
-> 手机上直接开同一个地址就能玩（左半屏拖动移动、右半屏点击冲刺、子弹自动索敌）。
+> 手机上：左半屏拖动移动、右半屏点击冲刺、子弹自动索敌。横屏体验最好。
 
 ## 直接分享给别人玩
 
@@ -16,10 +18,16 @@
 
 | 方式 | 操作 | 得到 |
 | --- | --- | --- |
-| **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 一个 https 链接，最快 |
-| **Cloudflare Pages** | 连接仓库或直接上传，构建命令留空、输出目录填 `/` | 一个 https 链接 |
+| **公网隧道（手机最稳）** | 双击 `share-online.cmd` —— 自动起服务器 + cloudflared 隧道，终端直接印出地址和二维码 | 一个 `https://xxx.trycloudflare.com` 链接，**手机 4G/5G 也能开**，HTTPS 让 PWA/离线缓存生效 |
+| **Netlify Drop** | 打开 app.netlify.com/drop，把整个项目文件夹拖进去 | 固定 https 链接，最快 |
+| **Cloudflare Pages** | 连接仓库或直接上传，构建命令留空、输出目录填 `/` | 固定 https 链接 |
 | **GitHub Pages** | 见下 | `https://<你>.github.io/neon-core/` |
-| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`）——终端会**直接印一个二维码**，手机相机对着扫就进游戏 | 同一个 WiFi 下手机/朋友立刻能玩 |
+| **局域网** | 双击 `share.cmd`（或 `node tools/serve.mjs 8787 lan`）——终端会**直接印一个二维码** | 同一个 WiFi 下手机立刻能玩 |
+
+> **手机连不上局域网怎么办？** 先分清楚是谁的问题：跑 `node tools/net-probe.mjs`，它会同时在几个端口监听并打印每一个进来的连接。
+> 手机访问后如果**日志一条都没有**，说明数据包根本没到电脑 —— 要么是防火墙（右键 `fix-phone-access.cmd` → 以管理员身份运行），要么是路由器开了"AP 隔离/设备隔离"（这种情况无解，直接用 `share-online.cmd` 走公网隧道）。
+>
+> 公网隧道是**匿名临时**的：地址每次重启都变，拿到链接的人都能进。玩完关掉窗口即可。
 
 GitHub Pages 的话：
 
