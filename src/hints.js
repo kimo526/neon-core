@@ -110,27 +110,27 @@ export function createHints(root) {
       .join('');
   }
 
-  return { update, build, updateAudio };
-}
+  /** 音响状态：BGM 曲目/音量、音效与播报开关（每帧刷，内容没变就不重建 DOM） */
+  let lastAudioKey = '';
+  function updateAudio(info) {
+    if (!built) build();
+    const host = root.querySelector('#hints-audio');
+    if (!host) return;
+    const key = `${info.musicOn}|${Math.round(info.musicVolume * 10)}|${info.musicLabel}|${info.sfxOn}|${info.voiceOn}`;
+    if (key === lastAudioKey) return;
+    lastAudioKey = key;
+    const pct = Math.round(info.musicVolume * 100);
+    host.innerHTML = `
+      <div class="hints-title" style="color:var(--neon)">音频</div>
+      <div class="hints-row"><b>♪ BGM</b><span>${info.musicOn ? `${pct}%` : '已关闭'}</span></div>
+      <div class="hints-note" style="color:${info.musicOn ? '#8fb4cc' : '#5c707f'}">${
+        info.musicOn ? (info.musicLabel ?? '（等待播放）') : '按 N 打开音乐'
+      }</div>
+      <div class="hints-row"><b>音效</b><span>${info.sfxOn ? '开' : '关'}</span></div>
+      <div class="hints-row"><b>播报</b><span>${info.voiceOn ? '开' : '关'}</span></div>
+      <div class="hints-row"><b>M / N / [ ]</b><span>静音 / 音乐 / 音量</span></div>
+    `;
+  }
 
-/** 音响状态：BGM 曲目/音量、音效与播报开关（每帧刷，不重建 DOM） */
-let lastAudioKey = '';
-function updateAudio(info) {
-  if (!built) build();
-  const host = root.querySelector('#hints-audio');
-  if (!host) return;
-  const key = `${info.musicOn}|${Math.round(info.musicVolume * 10)}|${info.musicLabel}|${info.sfxOn}|${info.voiceOn}`;
-  if (key === lastAudioKey) return;
-  lastAudioKey = key;
-  const pct = Math.round(info.musicVolume * 100);
-  host.innerHTML = `
-    <div class="hints-title" style="color:var(--neon)">音频</div>
-    <div class="hints-row"><b>♪ BGM</b><span>${info.musicOn ? `${pct}%` : '已关闭'}</span></div>
-    <div class="hints-note" style="color:${info.musicOn ? '#8fb4cc' : '#5c707f'}">${
-      info.musicOn ? info.musicLabel ?? '（等待播放）' : '按 N 打开音乐'
-    }</div>
-    <div class="hints-row"><b>音效</b><span>${info.sfxOn ? '开' : '关'}</span></div>
-    <div class="hints-row"><b>播报</b><span>${info.voiceOn ? '开' : '关'}</span></div>
-    <div class="hints-row"><b>M / N / [ ]</b><span>静音 / 音乐 / 音量</span></div>
-  `;
+  return { update, build, updateAudio };
 }
