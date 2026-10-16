@@ -6,6 +6,8 @@
 //   node tools/headless.mjs                       # 单人自动打 12 秒 → headless-solo.png
 //   node tools/headless.mjs coop 14               # 双人自动打 14 秒 → headless-coop.png
 //   node tools/headless.mjs coop 14 --keep-open   # 打完后不关浏览器（方便手动接着玩）
+//   node tools/headless.mjs solo 8 --proc         # 强制特殊攻击触发，专截红黑特效
+//   node tools/headless.mjs solo 8 --proc=0.05    # 指定触发率，实测特效频率
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,9 +18,11 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const mode = process.argv[2] === 'coop' ? 'coop' : 'solo';
 const seconds = Number(process.argv[3] ?? 12);
 const keepOpen = process.argv.includes('--keep-open');
+const procArg = process.argv.find((a) => a === '--proc' || a.startsWith('--proc='));
+const procRate = procArg ? (procArg.includes('=') ? Number(procArg.split('=')[1]) : 1) : null;
 const PORT = Number(process.env.NEON_PORT ?? 8787);
 const DEBUG_PORT = 9222 + (mode === 'coop' ? 1 : 0);
-const OUT = join(root, `headless-${mode}.png`);
+const OUT = join(root, `headless-${mode}${procRate !== null ? '-proc' : ''}.png`);
 
 const EDGE_CANDIDATES = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -160,18 +164,31 @@ async function main() {
 
   // 开局：单人 / 双人，然后交给 AI 托管（这样画面里一定有人在打）
   await evalJs(`window.NEON.start(${mode === 'coop' ? 2 : 1}); window.NEON.bot.on(true); window.NEON.setSpeed(2); true`);
+  if (procRate !== null) {
+    await evalJs(`window.NEON.setProcRate(${procRate}); true`);
+    console.error(`[headless] 特殊攻击触发率临时设为 ${(procRate * 100).toFixed(2)}%`);
+  }
   console.error(`[headless] ${mode} 模式开打，跑 ${seconds}s ...`);
 
   const t0 = Date.now();
+  let shotForProc = false;
   while ((Date.now() - t0) / 1000 < seconds) {
-    await sleep(1000);
+    await sleep(procRate !== null ? 120 : 1000);
     const d = await evalJs('JSON.stringify(window.NEON.debug())');
     const s = JSON.parse(d);
-    console.error(
-      `[headless] t=${((Date.now() - t0) / 1000).toFixed(0)}s wave=${s.wave} kills=${s.kills} 玩家=${s.players
-        .map((p) => `${p.name}:hp${p.hp}${p.down ? '(DOWN)' : ''}`)
-        .join(' ')}`
-    );
+    if (procRate === null) {
+      console.error(
+        `[headless] t=${((Date.now() - t0) / 1000).toFixed(0)}s wave=${s.wave} kills=${s.kills} 玩家=${s.players
+          .map((p) => `${p.name}:hp${p.hp}${p.down ? '(DOWN)' : ''}`)
+          .join(' ')}`
+      );
+    }
+    // 特效正在播放的那一瞬间截图，别等它结束
+    if (procRate !== null && !shotForProc && s.jackpotLife > 0.15) {
+      shotForProc = true;
+      console.error(`[headless] 捕获到超载特效（剩余 ${s.jackpotLife}s），立即截图`);
+      break;
+    }
     if (s.mode === 'over') {
       console.error('[headless] 团灭，提前截图');
       break;

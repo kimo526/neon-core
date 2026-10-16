@@ -1,7 +1,30 @@
 // 渲染层：只读 world，不改逻辑。所有"手感"的视觉部分都在这里。
-import { ARENA } from './content.js';
+import { ARENA, TUNING } from './content.js';
 
 const TAU = Math.PI * 2;
+
+/** 一道锯齿状黑闪电（特殊攻击特效专用） */
+function bolt(ctx, x0, y0, angle, len, seed) {
+  const segs = 8;
+  let x = x0;
+  let y = y0;
+  let a = angle;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  for (let i = 0; i < segs; i++) {
+    const s = Math.sin(seed * 0.7 + i * 2.3) * 0.55 + Math.sin(seed * 0.13 + i * 5.1) * 0.25;
+    a += s * 0.42;
+    x += Math.cos(a) * (len / segs);
+    y += Math.sin(a) * (len / segs);
+    ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = 'rgba(8, 0, 3, 0.92)';
+  ctx.lineWidth = 4.5;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 70, 100, 0.8)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+}
 
 const withAlpha = (hex, a) => {
   const h = hex.replace('#', '');
@@ -114,11 +137,24 @@ export function createRenderer(canvas) {
     // 脉冲环
     for (const pulse of world.pulses ?? []) {
       const a = Math.max(0, pulse.life / 0.32);
-      ctx.strokeStyle = `rgba(255, 90, 60, ${a * 0.9})`;
+      ctx.strokeStyle = withAlpha(pulse.color ?? '#ff5a3c', a * 0.9);
       ctx.lineWidth = 4 * a + 1;
       ctx.beginPath();
       ctx.arc(pulse.x, pulse.y, pulse.r, 0, TAU);
       ctx.stroke();
+    }
+
+    // 熔核尾迹（冲刺构筑）
+    for (const tr of world.trails ?? []) {
+      const k = Math.max(0, tr.life / (tr.maxLife || 1));
+      const g = ctx.createRadialGradient(tr.x, tr.y, 2, tr.x, tr.y, tr.r);
+      g.addColorStop(0, `rgba(140, 255, 220, ${0.3 * k})`);
+      g.addColorStop(0.65, `rgba(80, 220, 255, ${0.16 * k})`);
+      g.addColorStop(1, 'rgba(80, 220, 255, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, tr.r, 0, TAU);
+      ctx.fill();
     }
 
     // 敌人
@@ -194,6 +230,52 @@ export function createRenderer(canvas) {
       flash.a *= 0.88;
     }
 
+    // 特殊攻击：红黑超载特效（0.1% 触发，必须够炸）
+    if (world.jackpot?.life > 0) {
+      const jk = world.jackpot;
+      const k = Math.min(1, jk.life / TUNING.jackpotDuration);
+      const grow = 1 - k;
+      const src = world.players.find((p) => p.id === jk.id);
+      // 全屏红黑闪
+      ctx.fillStyle = `rgba(150, 0, 24, ${0.4 * k})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = `rgba(255, 210, 210, ${0.5 * k})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
+      // 地面黑环
+      ctx.strokeStyle = `rgba(10, 0, 4, ${0.85 * k})`;
+      ctx.lineWidth = 10 * k + 2;
+      ctx.beginPath();
+      ctx.arc(jk.x, jk.y, 60 + grow * 460, 0, TAU);
+      ctx.stroke();
+      // 黑闪电
+      const seed = (jk.life * 1000) | 0;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 7; i++) {
+        bolt(ctx, jk.x, jk.y, (i / 7) * TAU + seed * 0.013, 90 + grow * 220, seed + i * 977);
+      }
+      // 内圈亮红环
+      ctx.strokeStyle = `rgba(255, 60, 90, ${0.9 * k})`;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(jk.x, jk.y, 40 + grow * 150, 0, TAU);
+      ctx.stroke();
+      // 机甲自身的光环：红黑同心圆把"力量回来了"钉在玩家身上
+      if (src) {
+        ctx.strokeStyle = `rgba(12, 0, 4, ${0.9 * k})`;
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.arc(src.x, src.y, 24 + grow * 40, 0, TAU);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255, 45, 80, ${0.85 * k})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(src.x, src.y, 18 + grow * 26, 0, TAU);
+        ctx.stroke();
+      }
+    }
+
     // 多人时在每位玩家头顶标一个 P1 / P2，避免颜色看混
     if (world.players.length > 1) {
       ctx.font = 'bold 10px "Cascadia Mono", Consolas, monospace';
@@ -264,6 +346,18 @@ function drawPlayer(ctx, world, p, t) {
     ctx.beginPath();
     ctx.arc(0, 0, r + 6, 0, TAU);
     ctx.stroke();
+  }
+
+  // 反射装甲：护盾环
+  if (p.shield > 0) {
+    const ratio = Math.min(1, p.shield / Math.max(1, p.stats.shieldMax));
+    ctx.strokeStyle = `rgba(126, 247, 200, ${0.35 + ratio * 0.5})`;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 10, t * 0.8, t * 0.8 + TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   ctx.rotate(p.aim);
@@ -342,6 +436,19 @@ function drawEnemy(ctx, e, t) {
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.restore();
+
+  // 破空：被震住的敌人头上闪火花
+  if (e.stunned > 0) {
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 + 0.4 * Math.sin(t * 40)})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 6 + (i / 3) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(e.x + Math.cos(a) * r * 0.6, e.y + Math.sin(a) * r * 0.6);
+      ctx.lineTo(e.x + Math.cos(a) * (r + 8), e.y + Math.sin(a) * (r + 8));
+      ctx.stroke();
+    }
+  }
 
   // 血条：只在受伤后显示
   if (e.hp < e.hpMax - 0.01) {

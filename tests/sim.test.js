@@ -1,16 +1,19 @@
-﻿import { test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ARENA, STEP, TUNING } from '../src/content.js';
-import { accuracy, chooseCard, createWorld, makeInput, p1, step, waveComposition } from '../src/sim.js';
+import { accuracy, chooseCard, createWorld, makeInput, p1, step, triggerProc, waveComposition } from '../src/sim.js';
 import { CARDS, applyCard, createStats, rollCards, cardText } from '../src/upgrades.js';
 import { runHeadless } from '../src/harness.js';
 
-const placeEnemy = (world, x, y, type = 'drone') => {
+// ---------- 冲刺构筑 / 特殊攻击 用的测试夹具 ----------
+
+/** 放一个静止的靶子敌人 */
+const placeEnemy = (world, x, y, over = {}) => {
   world.enemies.length = 0;
   world.spawnQueue.length = 0;
   world.enemies.push({
     id: 999,
-    type,
+    type: 'drone',
     x,
     y,
     vx: 0,
@@ -26,13 +29,18 @@ const placeEnemy = (world, x, y, type = 'drone') => {
     fireCd: 0,
     hurt: 0,
     spawnT: 0,
+    stunned: 0,
     knockX: 0,
     knockY: 0,
     phase: 0,
-    lifeOnHit: 0.02,
+    targetId: 0,
+    ...over,
   });
   return world.enemies[0];
 };
+
+/** 只把玩家移动放进去的最小输入 */
+const dashInput = (over = {}) => ({ ...makeInput(), dash: true, moveX: 1, moveY: 0, ...over });
 
 test('新世界状态自洽：玩家满血、有初始波次', () => {
   const w = createWorld(7);
@@ -237,6 +245,158 @@ test('卡片：相位脉冲在冲刺穿过敌人时造成伤害', () => {
   for (let i = 0; i < 30; i++) step(w, input, STEP);
   assert.ok(e.hp < hp0, `冲刺穿过后应该掉血，现在 hp=${e.hp}`);
 });
+
+// ---------- 冲刺构筑 ----------
+
+test('冲刺构筑：相位刀锋放大所有冲刺伤害', () => {
+  const base = (card) => {
+    const w = createWorld(61);
+    const e = placeEnemy(w, 700, 270);
+    p1(w).x = 600;
+    p1(w).y = 270;
+    chooseCard(w, 'pulse');
+    if (card) chooseCard(w, card);
+    for (let i = 0; i < 30; i++) step(w, dashInput(), STEP);
+    return e.hpMax - e.hp;
+  };
+  const plain = base(null);
+  const boosted = base('phaseblade');
+  assert.ok(plain > 0, '相位脉冲本身要有伤害');
+  assert.ok(boosted > plain * 1.8, `相位刀锋应该显著放大冲刺伤害：${plain} → ${boosted}`);
+});
+
+test('冲刺构筑：熔核尾迹在冲刺路径上留下持续伤害区', () => {
+  const w = createWorld(62);
+  const e = placeEnemy(w, 505, 270, { hp: 99999, hpMax: 99999 });
+  p1(w).x = 500;
+  p1(w).y = 270;
+  chooseCard(w, 'coretrail');
+  assert.equal(w.trails.length, 0);
+  step(w, dashInput(), STEP);
+  assert.equal(w.trails.length, 1, '冲刺应该留下尾迹');
+  const hp0 = e.hp;
+  // 停在原地别把敌人撞飞，让尾迹自己烧
+  for (let i = 0; i < 20; i++) step(w, makeInput(), STEP);
+  assert.ok(e.hp < hp0, `站在尾迹里应该持续掉血，现在 hp=${e.hp}`);
+});
+
+test('冲刺构筑：急停爆发打出一圈弹幕', () => {
+  const w = createWorld(63);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  chooseCard(w, 'burststop');
+  let maxBullets = 0;
+  for (let i = 0; i < 20; i++) {
+    step(w, dashInput(), STEP);
+    maxBullets = Math.max(maxBullets, w.bullets.length);
+  }
+  assert.ok(maxBullets >= 8, `冲刺结束应该打出一圈弹幕，实际最多 ${maxBullets} 发`);
+});
+
+test('冲刺构筑：连锁冲刺让击杀返还冷却', () => {
+  const w = createWorld(64);
+  const e = placeEnemy(w, 300, 270, { hp: 1 });
+  chooseCard(w, 'chaindash');
+  // 先把充能打空、进入冷却
+  step(w, dashInput(), STEP);
+  for (let i = 0; i < 12; i++) step(w, makeInput(), STEP);
+  const before = p1(w).dashCd;
+  assert.ok(before > 0, '此时应该处于冲刺冷却中');
+  const input = { ...makeInput(300, 270), firing: true };
+  for (let i = 0; i < 60 && w.stats.kills === 0; i++) step(w, input, STEP);
+  assert.equal(w.stats.kills, 1, '应该击杀了目标');
+  assert.ok(p1(w).dashCd < before, `击杀应该返还冲刺冷却：${before} → ${p1(w).dashCd}`);
+});
+
+test('冲刺构筑：反射装甲给护盾，护盾优先抵挡伤害', () => {
+  const w = createWorld(65);
+  w.enemies.length = 0;
+  w.spawnQueue.length = 0;
+  chooseCard(w, 'reflectplate');
+  step(w, dashInput(), STEP);
+  assert.ok(p1(w).shield > 0, '冲刺应该获得护盾');
+  const shield0 = p1(w).shield;
+
+  // 手动打一下（数值可控），护盾应该先吃
+  const e = placeEnemy(w, p1(w).x, p1(w).y, { radius: 30, damage: 20, speed: 0 });
+  const hp0 = p1(w).hp;
+  p1(w).iframe = 0;
+  for (let i = 0; i < 3 && p1(w).shield >= shield0; i++) step(w, makeInput(), STEP);
+  assert.ok(p1(w).shield < shield0, '护盾应该吸收伤害');
+  assert.equal(p1(w).hp, hp0, '有护盾时不该掉血');
+  void e;
+});
+
+test('冲刺构筑：破空在起步瞬间震住身边敌人，被震住的敌人不动', () => {
+  const w = createWorld(66);
+  const e = placeEnemy(w, 545, 270, { hp: 9999, hpMax: 9999, speed: 160, accel: 900 });
+  p1(w).x = 500;
+  p1(w).y = 270;
+  chooseCard(w, 'voidbreak');
+  step(w, dashInput(), STEP);
+  assert.ok(e.stunned > 0, '冲刺起步时就该震住身边的敌人（不能等飞出去再判定）');
+  const x0 = e.x;
+  for (let i = 0; i < 10; i++) step(w, makeInput(), STEP);
+  assert.ok(Math.abs(e.x - x0) < 2, `被震住的敌人不该移动：${x0} → ${e.x}`);
+});
+
+// ---------- 特殊攻击（0.1% 红黑超载回满）----------
+
+test('特殊攻击：0.1% 概率触发，触发时状态全部回满', () => {
+  const w = createWorld(67);
+  const p = p1(w);
+  // 先把自己搞得很惨
+  p.hp = 7;
+  p.heat = p.stats.heatMax;
+  p.heatLock = true;
+  p.shield = 0;
+  p.dashCd = 3;
+  p.charges = 0;
+  p.stats.shieldMax = 50;
+
+  w.procRate = 1; // 强制触发
+  assert.equal(triggerProc(w, p, { x: p.x, y: p.y }), true);
+
+  assert.equal(p.hp, p.stats.hpMax, '血量应该回满');
+  assert.equal(p.heat, 0, '热量应该清零');
+  assert.equal(p.heatLock, false, '过热锁应该解除');
+  assert.equal(p.shield, 50, '护盾应该回满');
+  assert.equal(p.dashCd, 0, '冲刺冷却应该清零');
+  assert.ok(p.charges > 0, '冲刺充能应该回满');
+  assert.ok(p.iframe > 0, '触发时应该给一小段无敌');
+  assert.equal(p.jackpots, 1, '应该记一次超载次数');
+  assert.ok(w.jackpot.life > 0, '应该播放红黑特效');
+  assert.ok(w.events.some((e) => e.type === 'jackpot'), '应该发出 jackpot 事件');
+});
+
+test('特殊攻击：0.1% 概率的判定边界正确', () => {
+  const w = createWorld(68);
+  const p = p1(w);
+  const tap = (v) => {
+    w.rng = () => v;
+    w.procRate = undefined;
+    return triggerProc(w, p, null);
+  };
+  assert.equal(tap(0.0005), true, '小于 0.1% 的随机数应该触发');
+  assert.equal(tap(0.005), false, '大于 0.1% 的随机数不该触发');
+  assert.equal(tap(0.9), false);
+  assert.equal(tap(0.0009999), true);
+  assert.equal(tap(0.001), false, '正好等于阈值不触发');
+});
+
+test('特殊攻击：长跑统计上接近 0.1%', () => {
+  const w = createWorld(69);
+  const p = p1(w);
+  const trials = 20000;
+  let hits = 0;
+  for (let i = 0; i < trials; i++) {
+    p.heat = p.stats.heatMax;
+    if (triggerProc(w, p, null)) hits++;
+  }
+  const rate = hits / trials;
+  assert.ok(rate > 0.0002 && rate < 0.003, `${trials} 次的实测触发率 ${(rate * 100).toFixed(3)}% 偏离 0.1% 太多`);
+});
+
 
 test('卡片：残骸回收让击杀回血', () => {
   const w = createWorld(31);

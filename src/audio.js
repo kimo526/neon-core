@@ -161,6 +161,26 @@ export function createAudio(opts = {}) {
           case 'dash':
             noise({ dur: 0.16, gain: 0.16, type: 'bandpass', freq: 300, freqEnd: 2600, q: 0.9 });
             break;
+          case 'dashBurst':
+            noise({ dur: 0.14, gain: 0.2, freq: 2200, freqEnd: 400 });
+            tone({ type: 'square', f0: 520, f1: 180, dur: 0.12, gain: 0.12 });
+            break;
+          case 'shieldBreak':
+            tone({ type: 'triangle', f0: 900, f1: 220, dur: 0.3, gain: 0.2, filter: { freq: 2000 } });
+            noise({ dur: 0.22, gain: 0.18, type: 'bandpass', freq: 3200, q: 1.1 });
+            break;
+          case 'jackpot': {
+            // 0.1% 的大奖：低频轰鸣 + 金属泛音 + 长尾噪声
+            tone({ type: 'sine', f0: 90, f1: 34, dur: 1.1, gain: 0.42 });
+            [0, 7, 12, 19, 24].forEach((semi, i) => {
+              setTimeout(
+                () => tone({ type: 'square', f0: 220 * Math.pow(2, semi / 12), dur: 0.5, gain: 0.14, filter: { freq: 3200 } }),
+                i * 55
+              );
+            });
+            noise({ dur: 0.9, gain: 0.3, freq: 5200, freqEnd: 200, q: 0.7 });
+            break;
+          }
           case 'overheat':
             locked = true;
             tone({ type: 'sawtooth', f0: 300, f1: 70, dur: 0.5, gain: 0.3, filter: { freq: 900 } });

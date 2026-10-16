@@ -53,6 +53,10 @@ function makePlayer(index, stats, world) {
     down: false,
     heatLock: false,
     muzzle: 0,
+    stunT: 0,
+    stunned: 0,
+    shield: 0,
+    jackpots: 0,
     statsRun: { kills: 0, shots: 0, hits: 0, timeAlive: 0, damageDealt: 0 },
     _world: world,
   };
@@ -76,6 +80,9 @@ export function createWorld(seed = 1, opts = {}) {
     enemies: [],
     particles: [],
     pulses: [],
+    trails: [],
+    // 特殊攻击（红黑"超载回满"）：0.1% 的触发率，world 上可覆盖以便测试/调试
+    jackpot: { life: 0, x: 0, y: 0, id: 0 },
     spawnQueue: [],
     wave: 1,
     phase: 'play',
@@ -173,6 +180,7 @@ function spawnEnemy(world, type, scale) {
     fireCd: def.ranged ? 1.2 + world.rng() * 0.8 : 0,
     hurt: 0,
     spawnT: 0.45,
+    stunned: 0,
     knockX: 0,
     knockY: 0,
     phase: world.rng() * TAU,
@@ -255,11 +263,13 @@ export function step(world, inputs, dt) {
   }
   updateEnemies(world, sdt);
   updateBullets(world, sdt);
+  updateTrails(world, sdt);
   updateEnemyBullets(world, sdt);
   updateParticles(world, sdt);
   updateWave(world, sdt);
 
   world.screenShake = Math.max(0, world.screenShake - dt * 42);
+  world.jackpot.life = Math.max(0, world.jackpot.life - dt);
   for (const p of world.players) {
     p.muzzle = Math.max(0, p.muzzle - dt * 8);
     if (!p.down) p.statsRun.timeAlive += sdt;
@@ -404,9 +414,34 @@ function updatePlayer(world, p, input, dt) {
     p.iframe = Math.max(p.iframe, TUNING.dashIframe);
     p.charges -= 1;
     if (p.charges <= 0) p.dashCd = st.dashCooldown;
-    p.pulseHits = st.dashPulse ? new Set() : null;
-    ev(world, 'dash', { id: p.id, x: p.x, y: p.y, dir, charges: p.charges });
+    p.pulseHits = st.dashPulse > 0 ? new Set() : null;
+    // 冲刺构筑：护盾 / 熔核尾迹 / 破空（在起步瞬间震住身边敌人，不然人已经飞出去了）
+    if (st.shieldOnDash > 0) p.shield = Math.min(st.shieldMax, p.shield + st.shieldOnDash);
+    if (st.trailDamage > 0) {
+      world.trails.push({ owner: p.id, x: p.x, y: p.y, r: st.trailRadius, life: st.trailLife, maxLife: st.trailLife, dps: st.trailDamage, cd: new Map() });
+    }
+    if (st.dashStun > 0) {
+      for (const e of world.enemies) {
+        if (e.hp <= 0) continue;
+        const d = Math.hypot(e.x - p.x, e.y - p.y);
+        if (d < e.radius + 70) e.stunned = Math.max(e.stunned, st.dashStun);
+      }
+    }
+    ev(world, 'dash', { id: p.id, x: p.x, y: p.y, dir, charges: p.charges, dashDamage: st.dashDamage });
     spawnParticles(world, p.x, p.y, 8, '#8affc1', { speed: 200, life: 0.3, dir: dir + Math.PI, spread: 1.2 });
+  }
+
+  // 冲刺结束：急停爆发
+  if (dashing && p.dashT <= 0) {
+    if (st.burstOnDash) {
+      for (let i = 0; i < 8; i++) {
+        pushBullet(world, p, st, (i / 8) * TAU, st.damage * 0.55);
+      }
+      p.charges = Math.min(1 + Math.max(0, st.dashCharges), p.charges + 1);
+      p.dashCd = Math.max(0, p.dashCd - 0.4); // 急停返还一点冷却，让"冲刺—爆发—再冲刺"能连上
+      ev(world, 'dashBurst', { id: p.id, x: p.x, y: p.y });
+      spawnParticles(world, p.x, p.y, 12, '#8affc1', { speed: 300, life: 0.25 });
+    }
   }
 
   p.x += p.vx * dt;
@@ -456,35 +491,18 @@ function updatePlayer(world, p, input, dt) {
 }
 
 function fire(world, p, st) {
-  const w = st.weapon;
   p.fireCd = st.fireRate;
   p.heat = Math.min(st.heatMax, p.heat + st.heatPerShot);
   p.statsRun.shots += st.pellets;
   p.muzzle = 1;
 
   const thermo = 1 + st.thermo * clamp(p.heat / st.heatMax, 0, 1);
-  const dmg = st.damage * thermo;
   const muzzleX = p.x + Math.cos(p.aim) * (p.radius + 4);
   const muzzleY = p.y + Math.sin(p.aim) * (p.radius + 4);
 
   for (let i = 0; i < st.pellets; i++) {
     const jitter = st.pellets > 1 ? (world.rng() - 0.5) * st.spread : (world.rng() - 0.5) * st.spread * 0.6;
-    const a = p.aim + jitter;
-    world.bullets.push({
-      x: muzzleX,
-      y: muzzleY,
-      vx: Math.cos(a) * st.bulletSpeed,
-      vy: Math.sin(a) * st.bulletSpeed,
-      r: st.bulletRadius,
-      damage: dmg,
-      life: st.bulletLife,
-      pierce: st.pierce,
-      ricochet: st.ricochet,
-      knock: st.bulletKnockback,
-      hit: new Set(),
-      owner: p.id,
-      color: w === 'heavy' ? '#ffd166' : '#8ff6ff',
-    });
+    pushBullet(world, p, st, p.aim + jitter, st.damage * thermo, muzzleX, muzzleY);
   }
   spawnParticles(world, muzzleX, muzzleY, st.pellets > 1 ? 8 : 4, '#bff9ff', {
     speed: 260,
@@ -493,16 +511,38 @@ function fire(world, p, st) {
     dir: p.aim,
     spread: 0.9,
   });
-  ev(world, 'shoot', { id: p.id, x: muzzleX, y: muzzleY, pellets: st.pellets, weapon: w });
+  ev(world, 'shoot', { id: p.id, x: muzzleX, y: muzzleY, pellets: st.pellets, weapon: st.weapon });
 
   if (p.heat >= st.heatMax) {
     p.heatLock = true;
     ev(world, 'overheat', { id: p.id, x: p.x, y: p.y });
     if (st.ventBlast) {
       spawnParticles(world, p.x, p.y, 26, '#ff5a3c', { speed: 380, life: 0.5, size: 2.4 });
-      world.pulses.push({ owner: p.id, x: p.x, y: p.y, r: 8, maxR: 130, life: 0.32, damage: 26, hits: new Set() });
+      world.pulses.push({ owner: p.id, x: p.x, y: p.y, r: 8, maxR: 130, life: 0.32, damage: 26, hits: new Set(), color: '#ff5a3c' });
     }
   }
+}
+
+/** 生成一发子弹（普通射击和急停爆发共用） */
+function pushBullet(world, p, st, angle, damage, x = null, y = null, over = {}) {
+  const ox = x ?? p.x + Math.cos(angle) * (p.radius + 4);
+  const oy = y ?? p.y + Math.sin(angle) * (p.radius + 4);
+  world.bullets.push({
+    x: ox,
+    y: oy,
+    vx: Math.cos(angle) * st.bulletSpeed,
+    vy: Math.sin(angle) * st.bulletSpeed,
+    r: st.bulletRadius,
+    damage,
+    life: st.bulletLife,
+    pierce: st.pierce,
+    ricochet: st.ricochet,
+    knock: st.bulletKnockback,
+    hit: new Set(),
+    owner: p.id,
+    color: st.weapon === 'heavy' ? '#ffd166' : '#8ff6ff',
+    ...over,
+  });
 }
 
 function updateEnemies(world, dt) {
@@ -512,6 +552,14 @@ function updateEnemies(world, dt) {
       e.spawnT -= dt;
       continue;
     }
+    // 破空：被冲刺震住的敌人短暂停摆
+    if (e.stunned > 0) {
+      e.stunned -= dt;
+      e.vx *= Math.exp(-6 * dt);
+      e.vy *= Math.exp(-6 * dt);
+      continue;
+    }
+    e.stunned = 0;
 
     // 击退
     e.x += e.knockX * dt;
@@ -593,7 +641,7 @@ function updateEnemies(world, dt) {
       e.knockY -= ny * 260;
     }
 
-    // 冲刺脉冲（每个玩家独立判定）
+    // 冲刺脉冲（每个玩家独立判定；相位刀锋会放大这个伤害）
     for (const dp of world.players) {
       if (dp.down || dp.dashT <= 0 || !dp.pulseHits || dp.pulseHits.has(e.id)) continue;
       const d = Math.hypot(e.x - dp.x, e.y - dp.y);
@@ -601,8 +649,8 @@ function updateEnemies(world, dt) {
         dp.pulseHits.add(e.id);
         const px = (e.x - dp.x) / (d || 1);
         const py = (e.y - dp.y) / (d || 1);
-        hurtEnemy(world, e, 26, px, py, 320, dp, true);
-        spawnParticles(world, e.x, e.y, 10, '#8affc1', { speed: 260, life: 0.3 });
+        hurtEnemy(world, e, dp.stats.dashPulse * dp.stats.dashDamage, px, py, 320, dp, true);
+        spawnParticles(world, e.x, e.y, 10, dp.color, { speed: 260, life: 0.3 });
       }
     }
   }
@@ -611,7 +659,20 @@ function updateEnemies(world, dt) {
 }
 
 function damagePlayer(world, p, amount, fromX, fromY) {
-  const dmg = amount * p.stats.damageTaken;
+  let dmg = amount * p.stats.damageTaken;
+  // 反射装甲：先吃护盾，破盾时给一圈反馈
+  if (p.shield > 0) {
+    const absorbed = Math.min(p.shield, dmg);
+    p.shield -= absorbed;
+    dmg -= absorbed;
+    spawnParticles(world, p.x, p.y, 10, '#7ef7c8', { speed: 220, life: 0.3 });
+    if (p.shield <= 0) {
+      p.shield = 0;
+      spawnParticles(world, p.x, p.y, 16, '#7ef7c8', { speed: 320, life: 0.4 });
+      ev(world, 'shieldBreak', { id: p.id });
+    }
+  }
+  if (dmg <= 0) return;
   p.hp -= dmg;
   p.iframe = TUNING.reviveIframe * 0.55;
   world.screenShake = Math.max(world.screenShake, TUNING.shakePlayerHit);
@@ -648,6 +709,7 @@ function hurtEnemy(world, e, damage, nx, ny, knock, owner = null, isPulse = fals
   }
   spawnParticles(world, e.x, e.y, 5, e.color, { speed: 220, life: 0.26, dir: Math.atan2(-ny, -nx), spread: 1.8 });
   ev(world, 'hit', { x: e.x, y: e.y, damage, owner: owner?.id ?? 0 });
+  if (owner) triggerProc(world, owner, e);
   if (e.hp <= 0) killEnemy(world, e, nx, ny, owner);
 }
 
@@ -663,11 +725,62 @@ function killEnemy(world, e, nx, ny, owner = null) {
     spread: 2.4,
   });
   ev(world, 'kill', { x: e.x, y: e.y, type: e.type, by: owner?.id ?? 0, kills: world.stats.kills });
-  // 击杀回血（残骸回收）：只回给真正打死它的人
   if (owner) {
+    // 击杀回血（残骸回收）
     const heal = owner.stats.lifeOnKill;
     if (heal > 0) owner.hp = Math.min(owner.stats.hpMax, owner.hp + heal * 100);
+    // 连锁冲刺：杀完就能再冲
+    if (owner.stats.dashOnKill > 0) {
+      owner.dashCd = Math.max(0, owner.dashCd - owner.stats.dashOnKill);
+      if (owner.dashCd === 0) owner.charges = 1 + Math.max(0, owner.stats.dashCharges);
+    }
   }
+}
+
+/**
+ * 特殊攻击：每次攻击命中时有 0.1% 概率触发"超载回满"。
+ * 触发时玩家状态全部拉满（血量/护盾/热量/冲刺），并放出一段红黑特效。
+ */
+export function triggerProc(world, p, source = null) {
+  const rate = world.procRate ?? TUNING.jackpotChance;
+  if (rate <= 0 || p.down) return false;
+  if (world.rng() >= rate) return false;
+
+  p.hp = p.stats.hpMax;
+  p.shield = p.stats.shieldMax;
+  p.heat = 0;
+  p.heatLock = false;
+  p.charges = 1 + Math.max(0, p.stats.dashCharges);
+  p.dashCd = 0;
+  p.iframe = Math.max(p.iframe, 1.6);
+  p.jackpots++;
+
+  world.jackpot = { life: TUNING.jackpotDuration, x: source?.x ?? p.x, y: source?.y ?? p.y, id: p.id };
+  world.screenShake = Math.max(world.screenShake, 16);
+  world.hitStop = Math.max(world.hitStop, 0.12);
+  spawnParticles(world, p.x, p.y, 44, '#ff2b4a', { speed: 420, life: 0.8, size: 3 });
+  spawnParticles(world, p.x, p.y, 22, '#120008', { speed: 260, life: 0.9, size: 4 });
+  ev(world, 'jackpot', { id: p.id, x: p.x, y: p.y, count: p.jackpots });
+  return true;
+}
+
+/** 熔核尾迹：冲刺路径上留下一段持续伤害区 */
+function updateTrails(world, dt) {
+  if (!world.trails.length) return;
+  for (const tr of world.trails) {
+    tr.life -= dt;
+    for (const [id, t] of tr.cd) if (t > 0) tr.cd.set(id, t - dt);
+    for (const e of world.enemies) {
+      if (e.hp <= 0) continue;
+      const d = Math.hypot(e.x - tr.x, e.y - tr.y);
+      if (d > tr.r + e.radius) continue;
+      if ((tr.cd.get(e.id) ?? 0) > 0) continue;
+      tr.cd.set(e.id, 0.25);
+      const owner = world.players.find((p) => p.id === tr.owner) ?? null;
+      hurtEnemy(world, e, tr.dps * 0.25, 0, 0, 0, owner, true);
+    }
+  }
+  world.trails = world.trails.filter((t) => t.life > 0);
 }
 
 function updateBullets(world, dt) {

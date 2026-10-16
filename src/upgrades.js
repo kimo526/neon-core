@@ -1,4 +1,4 @@
-// 强化卡池：不做数值膨胀，尽量做"改变玩法"的词条。
+﻿// 强化卡池：不做数值膨胀，尽量做"改变玩法"的词条。
 import { PLAYER, WEAPONS, TUNING } from './content.js';
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -102,12 +102,76 @@ export const CARDS = [
   },
   {
     id: 'pulse',
-    tag: 'special',
+    tag: 'mobility',
     name: '相位脉冲',
-    desc: () => '冲刺穿过敌人时触发脉冲，造成 26 伤害并击退',
+    desc: () => '冲刺穿过敌人时触发脉冲：26 伤害 + 击退（冲刺构筑的起点）',
+    weight: 1,
+    apply: (s) => {
+      s.dashPulse = Math.max(s.dashPulse, 26);
+    },
+  },
+  // ---------- 冲刺构筑（互相叠加成一套"以冲刺为核心"的打法）----------
+  {
+    id: 'phaseblade',
+    tag: 'dash',
+    name: '相位刀锋',
+    desc: () => '所有冲刺伤害 ×2.5',
+    weight: 1,
+    apply: (s) => {
+      s.dashDamage *= 2.5;
+    },
+  },
+  {
+    id: 'coretrail',
+    tag: 'dash',
+    name: '熔核尾迹',
+    desc: (s) => `冲刺路径留下灼烧尾迹（${s.trailDamage + 22}/秒，持续 1.2 秒）`,
+    weight: 1,
+    apply: (s) => {
+      s.trailDamage += 22;
+      s.trailLife = Math.max(s.trailLife, 1.2);
+      s.trailRadius += 4;
+    },
+  },
+  {
+    id: 'burststop',
+    tag: 'dash',
+    name: '急停爆发',
+    desc: () => '冲刺结束打出一圈弹幕，并立刻返还 1 段冲刺充能',
     weight: 0.9,
     apply: (s) => {
-      s.dashPulse = true;
+      s.burstOnDash = true;
+    },
+  },
+  {
+    id: 'chaindash',
+    tag: 'dash',
+    name: '连锁冲刺',
+    desc: () => '每次击杀返还 0.45 秒冲刺冷却 —— 杀得越多，冲得越勤',
+    weight: 1,
+    apply: (s) => {
+      s.dashOnKill += 0.45;
+    },
+  },
+  {
+    id: 'reflectplate',
+    tag: 'dash',
+    name: '反射装甲',
+    desc: (s) => `冲刺获得 25 点护盾（上限 ${s.shieldMax + 50}，优先抵挡伤害）`,
+    weight: 1,
+    apply: (s) => {
+      s.shieldMax += 50;
+      s.shieldOnDash += 25;
+    },
+  },
+  {
+    id: 'voidbreak',
+    tag: 'dash',
+    name: '破空',
+    desc: () => '冲刺结束时震住周围敌人 0.55 秒',
+    weight: 0.9,
+    apply: (s) => {
+      s.dashStun += 0.55;
     },
   },
   {
@@ -217,6 +281,17 @@ export function createStats() {
     dashTime: TUNING.dashTime,
     dashCooldown: TUNING.dashCooldown,
     dashCharges: 0,
+    // 冲刺构筑：这些数值决定"冲刺流"能走多远
+    dashPulse: 0, // >0 时冲刺穿敌触发脉冲（数值 = 脉冲伤害）
+    dashDamage: 1, // 所有冲刺伤害的倍率
+    trailDamage: 0, // 熔核尾迹：每 0.25 秒的伤害
+    trailLife: 0.9,
+    trailRadius: 26,
+    shieldOnDash: 0,
+    shieldMax: 0,
+    dashStun: 0, // 破空：冲刺结束时震住周围敌人的秒数
+    burstOnDash: false, // 急停爆发：冲刺结束打出一圈弹幕
+    dashOnKill: 0, // 连锁冲刺：击杀返还的冷却秒数
     dashPulse: false,
 
     damageTaken: 1,

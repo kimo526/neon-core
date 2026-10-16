@@ -27,6 +27,8 @@ export const TUNING = {
   waveClearDelay: 1.35,
   cardCount: 3,
   spawnIframe: 1.2, // 开局/归队的无敌时间
+  jackpotChance: 0.001, // 特殊攻击（超载回满）触发率：每次命中 0.1%
+  jackpotDuration: 1.15, // 红黑特效持续时间
 };
 
 export const WEAPONS = {
@@ -91,4 +93,5 @@ export const UPGRADE_TAGS = {
   mobility: { label: '推进系统', color: '#8affc1' },
   chassis: { label: '装甲框架', color: '#ffd166' },
   special: { label: '异常模组', color: '#ff5cad' },
+  dash: { label: '冲刺构筑', color: '#7cf3ff' },
 };

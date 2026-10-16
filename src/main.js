@@ -1,6 +1,6 @@
 // 主循环：固定步长 60Hz 推进模拟，渲染跟随屏幕刷新率。
 import { STEP, TUNING, UPGRADE_TAGS } from './content.js';
-import { chooseCard, createWorld, skipRemainingCards, step } from './sim.js';
+import { chooseCard, createWorld, skipRemainingCards, step, triggerProc } from './sim.js';
 import { CARDS, cardText } from './upgrades.js';
 import { createInput } from './input.js';
 import { createRenderer } from './render.js';
@@ -54,6 +54,7 @@ function buildHud() {
       <div class="row"><span class="label">WEAPON</span><span class="value weapon">游侠脉冲</span></div>
       <div class="row"><span class="label">KILLS</span><span class="value kills">0</span></div>
       <div class="row"><span class="label">TIME</span><span class="value time">0.0s</span></div>
+      <div class="row"><span class="label">超载</span><span class="value jackpot">0</span></div>
     `;
     hudRoot.appendChild(box);
     const q = (sel) => box.querySelector(sel);
@@ -66,6 +67,7 @@ function buildHud() {
       weapon: q('.weapon'),
       kills: q('.kills'),
       time: q('.time'),
+      jackpot: q('.jackpot'),
       wave: q('.wave'),
     });
   }
@@ -89,6 +91,8 @@ function updateHud() {
     h.weapon.textContent = st.weapon === 'heavy' ? '重锤霰射' : '游侠脉冲';
     h.kills.textContent = p.statsRun.kills;
     h.time.textContent = `${p.statsRun.timeAlive.toFixed(1)}s`;
+    h.jackpot.textContent = p.jackpots;
+    h.jackpot.classList.toggle('warn', world.jackpot.life > 0 && world.jackpot.id === p.id);
   });
 }
 
@@ -276,6 +280,7 @@ function frame(now) {
         else if (e.type === 'playerDown') voice.announce('down', { now: world.time });
         else if (e.type === 'playerRevived') voice.announce('revive', { now: world.time });
         else if (e.type === 'allDown') voice.announce('lost', { now: world.time, force: true });
+        else if (e.type === 'jackpot') voice.announce('jackpot', { now: world.time, force: true });
       }
       acc -= STEP;
       guard++;
@@ -373,6 +378,16 @@ window.NEON = {
   get speed() {
     return speed;
   },
+  /** 调试特殊攻击：procRate=1 每发必触发、0 关闭；不传则恢复默认 0.1% */
+  setProcRate(v) {
+    world.procRate = v === undefined || v === null ? undefined : Math.max(0, Math.min(1, Number(v)));
+    return world.procRate ?? TUNING.jackpotChance;
+  },
+  /** 手动触发一次红黑超载特效（试听/截图用） */
+  forceProc() {
+    const p = world.players[0];
+    return triggerProc(world, p, { x: p.x, y: p.y });
+  },
   debug() {
     return {
       mode,
@@ -385,15 +400,19 @@ window.NEON = {
       enemies: world.enemies.length,
       bullets: world.bullets.length,
       particles: world.particles.length,
+      jackpotLife: +world.jackpot.life.toFixed(2),
+      procRate: world.procRate ?? 0.001,
       cards: world.cardChoices.map((l) => l.slice()),
       players: world.players.map((p) => ({
         name: p.name,
         hp: Math.round(p.hp),
         hpMax: p.stats.hpMax,
+        shield: Math.round(p.shield),
         heat: Math.round(p.heat),
         heatLock: p.heatLock,
         down: p.down,
         kills: p.statsRun.kills,
+        jackpots: p.jackpots,
         accuracy: p.statsRun.shots ? +(p.statsRun.hits / p.statsRun.shots).toFixed(3) : 0,
         cards: p.stats.taken.length,
         aim: +p.aim.toFixed(2),

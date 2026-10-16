@@ -53,6 +53,10 @@ const SYLLABLES = {
   dou: ['d', 'ou'],
   shi_bai: ['sh', 'i'],
   bai: ['b', 'ai'],
+  chao: ['ch', 'ao'],
+  zai: ['z', 'ai'],
+  hui: ['h', 'ei'],
+  man: ['m', 'an'],
 };
 
 const CN_DIGITS = ['yi', 'yi', 'er', 'san', 'si', 'wu', 'liu', 'qi', 'ba', 'jiu'];
@@ -174,6 +178,8 @@ export function createVoice(getCtx, getMaster) {
     revive: () => ({ syllables: ['xin', 'hao'], pitch: 190, gain: 0.07, contour: (k) => 0.9 + k * 0.45 }),
     down: () => ({ syllables: ['duan', 'kai'], pitch: 150, gain: 0.09, contour: (k) => 1.15 - k * 0.4 }),
     lost: () => ({ syllables: ['zhan', 'dou', 'shi_bai'], pitch: 125, gain: 0.095, contour: (k) => 1.05 - k * 0.28 }),
+    // 0.1% 大奖：拖长、压低、带一点失真感的"超载回满"
+    jackpot: () => ({ syllables: ['chao', 'zai', 'hui', 'man'], pitch: 118, gain: 0.11, contour: (k) => 1.25 - k * 0.3 }),
   };
 
   return {
